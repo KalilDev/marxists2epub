@@ -1,0 +1,261 @@
+import 'dart:collection';
+import 'dart:io';
+import 'epub_exports.dart' as epub;
+import 'package:core/src/html.dart';
+import 'package:mime/mime.dart';
+import 'package:mime/src/default_extension_map.dart';
+import 'package:html/dom.dart' as dom;
+import 'package:html/parser.dart' as dom_parser;
+import 'package:http/http.dart';
+import 'package:tuple/tuple.dart';
+import 'package:path/path.dart' as p;
+import 'package:uuid/uuid.dart';
+import 'package:xml/xml.dart';
+
+import 'navigation.dart';
+import 'utils.dart';
+
+class BookContents {
+  final Map<String, DocumentContents<String>> htmls;
+  final Map<String, DocumentContents<List<int>>> images;
+  final Map<String, DocumentContents<String>> css;
+  final ScrapedIndex index;
+  final String indexBasePath;
+
+  Iterable<DocumentContents<Object>> get allContents => htmls.values
+      .cast<DocumentContents<Object>>()
+      .followedBy(images.values)
+      .followedBy(css.values);
+
+  BookContents(
+    this.htmls,
+    this.images,
+    this.css,
+    this.index,
+    this.indexBasePath,
+  );
+}
+
+class DocumentContents<T> {
+  final T contents;
+  String _mimeType;
+  final String path;
+
+  DocumentContents(
+    this.contents,
+    String mimeType,
+    this.path,
+  ) : _mimeType = mimeType;
+  String _computeMimeType() {
+    if (contents is List<int>) {
+      return lookupMimeType(path,
+          headerBytes: (contents as List<int>)
+              .take(defaultMagicNumbersMaxLength)
+              .toList());
+    }
+    if (contents is String) {
+      return p.extension(path) == '.htm'
+          ? defaultExtensionMap['xhtml']
+          : lookupMimeType(path);
+    }
+    throw TypeError();
+  }
+
+  epub.EpubContentFile toEpubContentFile(String basePath) {
+    final path = p.normalize(p.join(basePath, this.path));
+    if (contents is List<int>) {
+      return epub.EpubByteContentFile()
+        ..Content = contents as List<int>
+        ..ContentMimeType = mimeType
+        ..ContentType = contentType
+        ..FileName = path;
+    }
+    if (contents is String) {
+      return epub.EpubTextContentFile()
+        ..Content = contents as String
+        ..ContentMimeType = mimeType
+        ..ContentType = contentType
+        ..FileName = path;
+    }
+    throw TypeError();
+  }
+
+  epub.EpubContentType get contentType {
+    switch (mimeType) {
+      case 'application/xhtml+xml':
+        return epub.EpubContentType.XHTML_1_1;
+      case 'text/css':
+        return epub.EpubContentType.CSS;
+      case 'application/x-dtbook+xml':
+        return epub.EpubContentType.DTBOOK;
+      case 'application/x-font-otf':
+        return epub.EpubContentType.FONT_OPENTYPE;
+      case 'application/x-font-ttf':
+        return epub.EpubContentType.FONT_TRUETYPE;
+      case 'image/gif':
+        return epub.EpubContentType.IMAGE_GIF;
+      case 'image/jpeg':
+        return epub.EpubContentType.IMAGE_JPEG;
+      case 'image/png':
+        return epub.EpubContentType.IMAGE_PNG;
+      case 'image/svg+xml':
+        return epub.EpubContentType.IMAGE_SVG;
+      case 'application/xml':
+        return epub.EpubContentType.XML;
+      case 'TODO':
+        return epub.EpubContentType.DTBOOK_NCX; // TODO
+      case 'TODO':
+        return epub.EpubContentType.OEB1_CSS; // TODO
+      case 'TODO':
+        return epub.EpubContentType.OEB1_DOCUMENT; // TODO
+      default:
+        return mimeType.endsWith('+xml')
+            ? epub.EpubContentType.XML
+            : epub.EpubContentType.OTHER;
+    }
+  }
+
+  String get id => idFor(path);
+
+  String get mimeType =>
+      ArgumentError.checkNotNull(_mimeType ??= _computeMimeType());
+}
+
+class ScrapedIndex {
+  final String cssLink;
+  final List<String> referredDocuments;
+  final List<String> referredImages;
+  final dom.Document document;
+  String contents;
+
+  final Map<String, String> documentChapterNameMap;
+
+  String chapterNameFor(String document) =>
+      documentChapterNameMap[document] ??
+      (p.basenameWithoutExtension(document) == 'index'
+          ? 'Índice'
+          : startUppercased(idFor(document)));
+  static final headerRegex = RegExp(r'h\d+');
+  String _title;
+  String get title => _title ??= (document.body.children
+          .skip(1)
+          .map((e) => e.text)
+          .takeWhile(headerRegex.hasMatch)
+          .join(' ')
+          .trim()
+          .nonEmpty ??
+      document.getElementsByTagName('title').single.text);
+
+  String _author;
+  String get author => _author ??= document
+          .getElementsByTagName('meta')
+          .where((e) => e.attributes['name'] == 'author')
+          .maybeSingle
+          ?.attributes
+          ?.get('content') ??
+      document.body.children.first.text;
+
+  Map<String, String> _scrapeInfo() {
+    final info = document
+        .getElementsByTagName('p')
+        .where((e) => e.attributes['class'] == 'information')
+        .single;
+
+    final result = <MapEntry<String, String>>[];
+    for (var i = 0; i < info.nodes.length; i++) {
+      final node = info.nodes[i];
+      if (node is! dom.Element) {
+        continue;
+      }
+      final element = info.nodes[i] as dom.Element;
+      if (element.localName != 'span' ||
+          element.attributes['class'] != 'info') {
+        continue;
+      }
+      final attribute = element.text;
+      final valAcc = StringBuffer();
+      loop:
+      for (i++; i < info.nodes.length; i++) {
+        final node = info.nodes[i];
+        if (node is! dom.Element) {
+          valAcc.write(node.text);
+          continue;
+        }
+        final element = node as dom.Element;
+        switch (element.localName) {
+          case 'br':
+            valAcc.writeln();
+            break;
+          case 'span':
+            if (element.attributes['class'] == 'info') {
+              i--;
+              break loop;
+            }
+            valAcc.write(element.innerHtml);
+            break;
+          default:
+            valAcc.write(element.innerHtml);
+            break;
+        }
+      }
+      result.add(MapEntry(attribute, valAcc.toString()));
+    }
+    return Map.fromEntries(result);
+  }
+
+  Map<String, String> _scrapedInfo;
+  Map<String, String> get scrapedInfo => _scrapedInfo ??= _scrapeInfo();
+
+  ScrapedIndex(
+    this.cssLink,
+    this.referredDocuments,
+    this.referredImages,
+    this.document,
+    this.contents,
+    this.documentChapterNameMap,
+  );
+}
+
+ScrapedIndex scapeDocument(String contents) {
+  if (contents.contains('WAYBACK TOOLBAR INSERT')) {
+    const jsStart = '<script src="//archive.org/includes/';
+    const jsEnd = '<!-- End Wayback Rewrite JS Include -->';
+    const toolbarStart = '<!-- BEGIN WAYBACK TOOLBAR INSERT -->';
+    const toolbarEnd = '<!-- END WAYBACK TOOLBAR INSERT -->';
+    contents = contents.substring(0, contents.indexOf(jsStart)) +
+        contents.substring(
+          contents.indexOf(jsEnd) + jsEnd.length,
+          contents.indexOf(toolbarStart),
+        ) +
+        contents.substring(contents.indexOf(toolbarEnd) + toolbarEnd.length);
+  }
+  final index = dom_parser.parse(contents);
+  final documentChapters = Map.fromEntries(index
+      .getElementsByTagName('a')
+      .where((e) => !hasHrefSection(e.attributes['href']))
+      .where(isPartOfTOC)
+      .map((e) => MapEntry(e.attributes['href'], e.text)));
+  final hrefs = index
+      .getElementsByTagName('a')
+      .map((e) => e.attributes['href'])
+      .where((e) => e != null)
+      .map(withoutHrefSection)
+      .toSet();
+  final cssLink = index
+      .getElementsByTagName('link')
+      .where((e) => e.attributes['rel'] == 'stylesheet')
+      .map((e) => e.attributes['href'])
+      .single;
+  final images = index
+      .getElementsByTagName('img')
+      .map((e) => e.attributes['src'])
+      .where((e) => e != null);
+  return ScrapedIndex(
+    cssLink,
+    hrefs.toList(),
+    images.toList(),
+    index,
+    contents,
+    documentChapters,
+  );
+}

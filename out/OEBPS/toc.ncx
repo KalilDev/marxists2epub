@@ -1,0 +1,89 @@
+<?xml version='1.0' encoding='utf-8'?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1" xml:lang="pt">
+  <head>
+    <meta content="0459c028-259f-4990-9ea1-577c150d8919" name="dtb:uid"/>
+    <meta content="0" name="dtb:totalPageCount"/>
+    <meta content="0" name="dtb:maxPageNumber"/>
+    <meta content="1" name="dtb:depth"/>
+  </head>
+  <docTitle>
+    <text>José Carlos Mariátegui: Seven Interpretative Essays on Peruvian Reality --1928</text>
+  </docTitle>
+  <docAuthor>
+    <text>José Carlos Mariátegui</text>
+  </docAuthor>
+  <navMap>
+    <navPoint id="0c273579-fce9-4aed-ad08-0c1d11cdbebf" playOrder="1">
+      <navLabel>
+        <text>Índice</text>
+      </navLabel>
+      <content src="index.htm"/>
+    </navPoint>
+    <navPoint id="85439866-29db-42f7-9de0-201f50ae7141" playOrder="2">
+      <navLabel>
+        <text>Introduction by Jorge Basadre</text>
+      </navLabel>
+      <content src="intro.htm"/>
+    </navPoint>
+    <navPoint id="ae0c6625-21e8-4c07-835e-c0f9c5849cfe" playOrder="3">
+      <navLabel>
+        <text>Author’s Note</text>
+      </navLabel>
+      <content src="author.htm"/>
+    </navPoint>
+    <navPoint id="4afa11b7-7f84-4855-8023-e7cb9ed33f09" playOrder="4">
+      <navLabel>
+        <text>Essay one: Outline of the Economic Evolution</text>
+      </navLabel>
+      <content src="essay01.htm"/>
+    </navPoint>
+    <navPoint id="2a2bd8ea-4742-4322-8f15-7c7fb4b67d66" playOrder="5">
+      <navLabel>
+        <text>Essay two: “The Problem of the Indian”</text>
+      </navLabel>
+      <content src="essay02.htm"/>
+    </navPoint>
+    <navPoint id="b9cdf4ee-37c1-45a7-a837-3302ed92589f" playOrder="6">
+      <navLabel>
+        <text>Essay three: The Problem of Land</text>
+      </navLabel>
+      <content src="essay03.htm"/>
+    </navPoint>
+    <navPoint id="a82de40e-7e68-4d40-ba5d-ccb48b840654" playOrder="7">
+      <navLabel>
+        <text>Essay four: Public Education</text>
+      </navLabel>
+      <content src="essay04.htm"/>
+    </navPoint>
+    <navPoint id="5da71f7c-27ee-4943-8d64-ebe4e67dec6e" playOrder="8">
+      <navLabel>
+        <text>Essay five: “The Religious Factor”</text>
+      </navLabel>
+      <content src="essay05.htm"/>
+    </navPoint>
+    <navPoint id="abe16f8d-40bc-4241-a2a9-c99e123a5f62" playOrder="9">
+      <navLabel>
+        <text>Essay six: “Regionalism and Centralism”</text>
+      </navLabel>
+      <content src="essay06.htm"/>
+    </navPoint>
+    <navPoint id="b80e7612-7765-4173-b803-fae552bcbc68" playOrder="10">
+      <navLabel>
+        <text>Essay seven: Literature on Trial</text>
+      </navLabel>
+      <content src="essay07.htm"/>
+    </navPoint>
+    <navPoint id="8a6caf24-59db-4f65-9169-2b04c7496eca" playOrder="11">
+      <navLabel>
+        <text>Glossary</text>
+      </navLabel>
+      <content src="glossary.htm"/>
+    </navPoint>
+    <navPoint id="e13f28f2-6c66-4750-8925-c4d969586da4" playOrder="12">
+      <navLabel>
+        <text>FileNotFound</text>
+      </navLabel>
+      <content src="fileNotFound.htm"/>
+    </navPoint>
+  </navMap>
+</ncx>

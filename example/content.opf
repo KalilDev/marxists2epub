@@ -1,0 +1,45 @@
+<?xml version='1.0' encoding='utf-8'?>
+<package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="uuid_id">
+  <metadata xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:opf="http://www.idpf.org/2007/opf" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:calibre="http://calibre.kovidgoyal.net/2009/metadata" xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:language>pt</dc:language>
+    <dc:creator opf:file-as="Marx, Karl" opf:role="aut">Karl Marx</dc:creator>
+    <meta name="calibre:timestamp" content="2011-05-10T12:55:34+00:00"/>
+    <meta name="calibre:title_sort" content="Value, Price and Profit"/>
+    <meta name="cover" content="cover"/>
+    <dc:date>2011-05-10T00:00:00+00:00</dc:date>
+    <dc:contributor opf:role="bkp">calibre (0.7.55) [http://calibre-ebook.com]</dc:contributor>
+    <dc:title>Value, Price and Profit</dc:title>
+    <dc:identifier id="uuid_id" opf:scheme="uuid">feac8cf1-5645-4ee2-81fe-9a979a77dd5e</dc:identifier>
+    <dc:subject>General Fiction</dc:subject>
+  </metadata>
+  <manifest>
+    <item href="cover1.jpeg" id="cover" media-type="image/jpeg"/>
+    <item href="OPS/67km1.jpg" id="67km1" media-type="image/jpeg"/>
+    <item href="OPS/TableOfContents.html" id="TableOfContents" media-type="application/xhtml+xml"/>
+    <item href="OPS/ch01.htm" id="ch01" media-type="application/xhtml+xml"/>
+    <item href="OPS/ch02.htm" id="ch02" media-type="application/xhtml+xml"/>
+    <item href="OPS/ch03.htm" id="ch03" media-type="application/xhtml+xml"/>
+    <item href="OPS/index.htm" id="index" media-type="application/xhtml+xml"/>
+    <item href="OPS/introduction.htm" id="introduction" media-type="application/xhtml+xml"/>
+    <item href="OPS/notes.htm" id="notes" media-type="application/xhtml+xml"/>
+    <item href="OPS/preface.htm" id="preface" media-type="application/xhtml+xml"/>
+    <item href="stylesheet1.css" id="css1" media-type="text/css"/>
+    <item href="titlepage.xhtml" id="titlepage" media-type="application/xhtml+xml"/>
+    <item href="toc.ncx" media-type="application/x-dtbncx+xml" id="ncx"/>
+  </manifest>
+  <spine toc="ncx">
+    <itemref idref="titlepage"/>
+    <itemref idref="TableOfContents"/>
+    <itemref idref="index"/>
+    <itemref idref="introduction"/>
+    <itemref idref="preface"/>
+    <itemref idref="ch01"/>
+    <itemref idref="ch02"/>
+    <itemref idref="ch03"/>
+    <itemref idref="notes"/>
+  </spine>
+  <guide>
+    <reference href="OPS/TableOfContents.html" type="toc" title="Table of Contents"/>
+    <reference href="titlepage.xhtml" type="cover" title="Cover"/>
+  </guide>
+</package>
