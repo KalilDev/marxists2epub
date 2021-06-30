@@ -97,7 +97,7 @@ epub.EpubNavigation _navigationFor(BookContents contents, String uid) {
   return nav;
 }
 
-epub.EpubMetadata _metadataFor(ScrapedIndex index, String uid) {
+epub.EpubMetadata _metadataFor(ScrapedDocument index, String uid) {
   final meta = epub.EpubMetadata();
   const contributorRoles = {
     'Transcription\HTML Markup': 'trc',

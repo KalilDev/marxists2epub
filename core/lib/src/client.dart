@@ -8,6 +8,8 @@ import 'package:json_annotation/json_annotation.dart';
 import 'package:mime/mime.dart' as mime;
 import 'package:http_parser/http_parser.dart';
 import 'package:collection/collection.dart';
+import 'package:synchronized/synchronized.dart';
+import 'package:synchronized/extension.dart';
 part 'client.g.dart';
 
 abstract class ClientStorage {
@@ -208,6 +210,20 @@ class HiveProxyClientStorage implements ClientStorage {
     final interactions = await Future.wait(_box.keys.map((e) => _box.get(e)));
     print(JsonEncoder.withIndent(' ').convert(interactions));
   }
+}
+
+class RateLimitedClient implements Client {
+  final Client _client;
+  final Duration rateLimit;
+
+  RateLimitedClient(this._client, this.rateLimit);
+  Future<Response> get(Uri uri, {Map<String, String> headers}) =>
+      _client.synchronized(() => Future.delayed(
+            rateLimit,
+            () => _client.get(uri, headers: headers),
+          ));
+
+  Never noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
 class RecordingClient implements Client {

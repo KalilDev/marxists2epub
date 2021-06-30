@@ -8,7 +8,7 @@ final _client = Client();
 Future<String> _fetchDocument(dynamic uri, Client client) =>
     client.get(_uriFromUriOrString(uri)).then((r) => r.body);
 
-Future<ScrapedIndex> getAndScapeIndex(dynamic index, Client client) =>
+Future<ScrapedDocument> getAndScapeIndex(dynamic index, Client client) =>
     _fetchDocument(index, client).then(scapeDocument);
 
 final _quoteGroup = '\[\"\'\]\*';
@@ -30,20 +30,19 @@ Uri _uriFromUriOrString(dynamic uriOrString) =>
 Future<String> _fetchAndImportCss(dynamic css, Client client) async {
   final uri = _uriFromUriOrString(css);
   var contents = await client.get(uri).then((r) => r.body);
-  final base = p.dirname(uri.toString());
   for (final imported in capturingImportRegex.allMatches(contents).toSet()) {
     final importedUrl = imported.group(1);
-    final joint = p.join(base, importedUrl);
+    final joint = uri.resolve(importedUrl);
     final importedCss = await _fetchAndImportCss(joint, client);
     contents = contents.replaceAll(importRegexFor(importedUrl), importedCss);
   }
   return contents;
 }
 
-final _cssStylesheetStatementRegex =
-    RegExp('<link\s+rel="stylesheet"\s+type="text\/css"\s+href="(.*)"\s*>');
-Future<String> _fetchDocAndReplaceCss(dynamic uri, String previousCssPath,
-        String targetCssPath, Client client) =>
+final _cssStylesheetStatementRegex = RegExp(
+    r'<link\s+rel="stylesheet"\s+type="text\/css"\s+href="(.*)"\s*(:?\/|)>');
+Future<String> _fetchDocAndReplaceCss(
+        dynamic uri, String targetCssPath, Client client) =>
     _fetchDocument(uri, client) //
         .then(
       (contents) => contents.replaceAll(
@@ -73,51 +72,81 @@ String _uriRelativePathFrom(Uri path, Uri from) {
   if (path.origin != from.origin) {
     return null;
   }
-  return p.relative(path.path, from: from.path);
+  return p.relative(
+    path.path,
+    from: from.path.endsWith('/') ? from.path : '${from.path}/',
+  );
 }
 
 Uri _uriDirname(Uri uri) => uri.replace(path: p.dirname(uri.path) + '/');
 
+class Context {
+  final Uri baseUri;
+  final Uri indexUri;
+  final List<Uri> allowedSources;
+  final Uri notFoundFileUri;
+
+  Context(
+    this.baseUri,
+    this.indexUri,
+    this.allowedSources,
+    this.notFoundFileUri,
+  ) {
+    assert(_uriIsWithin(baseUri, indexUri));
+    assert(allowedSources.every((uri) => _uriIsWithin(baseUri, uri)));
+    assert(_uriIsWithin(baseUri, notFoundFileUri));
+  }
+  String absolutePathFor(Uri uri) =>
+      _uriIsWithin(baseUri, uri) ? _uriRelativePathFrom(uri, baseUri) : null;
+  bool isAllowed(Uri uri) =>
+      allowedSources.any((source) => _uriIsWithin(source, uri));
+}
+
 Future<String> _scrapeFileFetchingReferred(
-  String data,
-  Uri docUri,
-  Uri baseUri,
+  String parentData,
+  Uri parentUri,
+  Context context,
   Map<String, DocumentContents<String>> docs,
   Set<Uri> indexedDocumentUris,
   Uri targetCssUri,
   Client client,
   int remainingDepth,
 ) async {
-  print('Recursively scraping $docUri');
-  final docBaseUri = _uriDirname(docUri);
-  final doc = scapeDocument(data);
-  for (final referred in doc.referredDocuments) {
-    final referredUri = docBaseUri.resolve(referred);
-    final referredBaseUri = _uriDirname(referredUri);
-    final absolutePath = _uriRelativePathFrom(referredUri, baseUri);
-    if (docs.containsKey(absolutePath)) {
+  print('Recursively scraping $parentUri');
+  final parent = scapeDocument(parentData);
+  for (final referred in parent.referredDocuments) {
+    final referredUri = parentUri.resolve(referred);
+    if (!(referredUri.isScheme('http') || referredUri.isScheme('https'))) {
+      continue;
+    }
+    if (docs.containsKey(context.absolutePathFor(referredUri))) {
       continue;
     }
     if (indexedDocumentUris.contains(referredUri)) {
       print('Skipping indexed $referredUri');
-      doc.contents = doc.contents
-          .replaceAll(referred, _uriRelativePathFrom(referredUri, docBaseUri));
+      parent.contents = parent.contents.replaceAll(
+        '"$referred"',
+        '"${_uriRelativePathFrom(referredUri, parentUri)}"',
+      );
       continue;
     }
     if (!_uriIsWithin(baseUri, referredUri) || remainingDepth <= 0) {
-      final absoluteNotFoundFile = baseUri.resolve(notFoundFileName);
       final relativeNotFoundFilePath =
           _uriRelativePathFrom(absoluteNotFoundFile, docBaseUri);
-      print('Replacing $referredUri with 404');
+      final message = remainingDepth <= 0
+          ? 'because the depth limit was reached'
+          : 'because it is outside the base';
+      print('Replacing $referredUri with 404 $message');
       // Replace with 404
-      doc.contents =
-          doc.contents.replaceAll(referred, relativeNotFoundFilePath);
+      parent.contents = parent.contents.replaceAll(
+        '"$referred"',
+        '"$relativeNotFoundFilePath"',
+      );
       continue;
     }
-    print('Fetching $docUri child: $referredUri');
+    print('Fetching $parentUri child: $referredUri');
     var referredData = await _fetchDocAndReplaceCss(
       referredUri,
-      doc.cssLink,
       _uriRelativePathFrom(targetCssUri, referredBaseUri),
       client,
     );
@@ -135,7 +164,7 @@ Future<String> _scrapeFileFetchingReferred(
     );
     docs[absolutePath] = DocumentContents(referredData, null, absolutePath);
   }
-  return doc.contents;
+  return parent.contents;
 }
 
 String withTrailingSlash(String other) =>
@@ -163,7 +192,7 @@ Future<BookContents> fetchBook(
         'The index `$indexUri` is not contained in the base $baseUri!');
   }
   if (depth < 1) {
-    throw StateError('The depth is invalid. The minimun depth is 1');
+    throw StateError('The depth is invalid. The minimum allowed depth is 1');
   }
 
   final idx = await getAndScapeIndex(indexUri, client);
@@ -182,7 +211,9 @@ Future<BookContents> fetchBook(
 
   final absoluteNotFound = baseUri.resolve(absoluteNotFoundFile.path);
   idx.contents = idx.contents.replaceAll(
-      idx.cssLink, _uriRelativePathFrom(absoluteTargetCssUri, indexBaseUri));
+    '"${idx.cssLink}"',
+    '"${_uriRelativePathFrom(absoluteTargetCssUri, indexBaseUri)}"',
+  );
   final targetCssUri = baseUri.resolve(targetCssPath);
   final docs = <String, DocumentContents<String>>{};
   final images = <String, DocumentContents<List<int>>>{};
@@ -194,12 +225,18 @@ Future<BookContents> fetchBook(
       idx.referredDocuments.map(indexBaseUri.resolve).toSet();
   for (final doc in idx.referredDocuments) {
     final docUri = indexBaseUri.resolve(doc);
+    if (!(docUri.isScheme('http') || docUri.isScheme('https'))) {
+      continue;
+    }
     final docBaseUri = _uriDirname(docUri);
     if (!_uriIsWithin(baseUri, docUri)) {
       final relativeNotFoundPath =
           _uriRelativePathFrom(absoluteNotFound, indexBaseUri);
+      final message = 'because it is outside the base';
+      print('Replacing $docUri with 404 $message');
       // Remove the chapter and replace the url with an 404
-      idx.contents = idx.contents.replaceAll(doc, relativeNotFoundPath);
+      idx.contents =
+          idx.contents.replaceAll('"$doc"', '"$relativeNotFoundPath"');
       idx.documentChapterNameMap.remove(doc);
       continue;
     }
@@ -207,7 +244,6 @@ Future<BookContents> fetchBook(
     print('Fetching indexed doc $docUri');
     var docData = await _fetchDocAndReplaceCss(
       docUri,
-      idx.cssLink,
       relativeCssPath,
       client,
     );
@@ -233,11 +269,10 @@ Future<BookContents> fetchBook(
 
     if (!_uriIsWithin(baseUri, imgUri)) {
       imgUri = baseUri.resolve(p.join('images', imgUri.pathSegments.join('_')));
-      continue;
     }
 
     final relativeFromIndex = _uriRelativePathFrom(imgUri, indexBaseUri);
-    idx.contents = idx.contents.replaceAll(img, relativeFromIndex);
+    idx.contents = idx.contents.replaceAll('"$img"', '"$relativeFromIndex"');
     images[relativeFromIndex] =
         DocumentContents(imgData, null, relativeFromIndex);
   }

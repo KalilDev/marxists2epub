@@ -19,7 +19,7 @@ class BookContents {
   final Map<String, DocumentContents<String>> htmls;
   final Map<String, DocumentContents<List<int>>> images;
   final Map<String, DocumentContents<String>> css;
-  final ScrapedIndex index;
+  final ScrapedDocument index;
   final String indexBasePath;
 
   Iterable<DocumentContents<Object>> get allContents => htmls.values
@@ -121,14 +121,9 @@ class DocumentContents<T> {
       ArgumentError.checkNotNull(_mimeType ??= _computeMimeType());
 }
 
-class ScrapedIndex {
-  final String cssLink;
-  final List<String> referredDocuments;
-  final List<String> referredImages;
+class ScrapedDocument {
   final dom.Document document;
   String contents;
-
-  final Map<String, String> documentChapterNameMap;
 
   String chapterNameFor(String document) =>
       documentChapterNameMap[document] ??
@@ -155,13 +150,7 @@ class ScrapedIndex {
           ?.get('content') ??
       document.body.children.first.text;
 
-  Map<String, String> _scrapeInfo() {
-    final info = document
-        .getElementsByTagName('p')
-        .where((e) => e.attributes['class'] == 'information')
-        .single;
-
-    final result = <MapEntry<String, String>>[];
+  static Iterable<MapEntry<String, String>> _parseInfo(dom.Element info) sync* {
     for (var i = 0; i < info.nodes.length; i++) {
       final node = info.nodes[i];
       if (node is! dom.Element) {
@@ -198,25 +187,67 @@ class ScrapedIndex {
             break;
         }
       }
-      result.add(MapEntry(attribute, valAcc.toString()));
+      yield MapEntry(attribute, valAcc.toString());
     }
+  }
+
+  Map<String, String> _scrapeInfo() {
+    final infos = document
+        .getElementsByTagName('p')
+        .where((e) => e.attributes['class'] == 'information');
+    final result = infos.expand(_parseInfo);
     return Map.fromEntries(result);
   }
 
   Map<String, String> _scrapedInfo;
   Map<String, String> get scrapedInfo => _scrapedInfo ??= _scrapeInfo();
 
-  ScrapedIndex(
-    this.cssLink,
-    this.referredDocuments,
-    this.referredImages,
+  ScrapedDocument(
     this.document,
     this.contents,
-    this.documentChapterNameMap,
   );
+  String _cssLink;
+
+  /// Find the single css link. Throws if there aren't any or there are
+  /// more than one
+  String get cssLink => _cssLink ??= document
+      .getElementsByTagName('link')
+      .where((e) => e.attributes['rel'] == 'stylesheet')
+      .where(hasHref)
+      .map((e) => e.attributes['href'])
+      .single;
+
+  Map<String, String> _documentChapterNameMap;
+
+  /// Scrape the anchors and find the chapters. Only valid for some index.htm
+  /// documents
+  Map<String, String> get documentChapterNameMap =>
+      _documentChapterNameMap ??= Map.fromEntries(document
+          .getElementsByTagName('a')
+          .where(hasHref)
+          .where((e) => !hasHrefSection(e.attributes['href']))
+          .where(isPartOfTOC)
+          .map((e) => MapEntry(e.attributes['href'], e.text)));
+  Set<String> _referredDocuments;
+
+  /// Scrape the anchors.
+  Set<String> get referredDocuments => _referredDocuments ??= document
+      .getElementsByTagName('a')
+      .where(hasHref)
+      .map((e) => e.attributes['href'])
+      .map(withoutHrefSection)
+      .toSet();
+
+  Set<String> _referredImages;
+
+  /// Scrape the img elements
+  Set<String> get referredImages => _referredImages ??= document
+      .getElementsByTagName('img')
+      .map((e) => e.attributes['src'])
+      .where((e) => e != null);
 }
 
-ScrapedIndex scapeDocument(String contents) {
+ScrapedDocument scapeDocument(String contents) {
   if (contents.contains('WAYBACK TOOLBAR INSERT')) {
     const jsStart = '<script src="//archive.org/includes/';
     const jsEnd = '<!-- End Wayback Rewrite JS Include -->';
@@ -230,32 +261,8 @@ ScrapedIndex scapeDocument(String contents) {
         contents.substring(contents.indexOf(toolbarEnd) + toolbarEnd.length);
   }
   final index = dom_parser.parse(contents);
-  final documentChapters = Map.fromEntries(index
-      .getElementsByTagName('a')
-      .where((e) => !hasHrefSection(e.attributes['href']))
-      .where(isPartOfTOC)
-      .map((e) => MapEntry(e.attributes['href'], e.text)));
-  final hrefs = index
-      .getElementsByTagName('a')
-      .map((e) => e.attributes['href'])
-      .where((e) => e != null)
-      .map(withoutHrefSection)
-      .toSet();
-  final cssLink = index
-      .getElementsByTagName('link')
-      .where((e) => e.attributes['rel'] == 'stylesheet')
-      .map((e) => e.attributes['href'])
-      .single;
-  final images = index
-      .getElementsByTagName('img')
-      .map((e) => e.attributes['src'])
-      .where((e) => e != null);
-  return ScrapedIndex(
-    cssLink,
-    hrefs.toList(),
-    images.toList(),
+  return ScrapedDocument(
     index,
     contents,
-    documentChapters,
   );
 }

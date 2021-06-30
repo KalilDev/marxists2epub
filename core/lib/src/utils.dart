@@ -45,3 +45,4 @@ String withoutSemicolon(String str) =>
 const contentPath = 'OEBPS';
 String withContentPath(String path) => p.join(contentPath, path);
 String idFor(String href) => p.split(p.withoutExtension(href)).join('_');
+bool hasHref(dom.Element e) => e.attributes.containsKey('href');

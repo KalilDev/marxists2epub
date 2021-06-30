@@ -8,18 +8,18 @@ import 'package:hive/hive.dart';
 import 'package:http/http.dart';
 import 'package:path/path.dart' as p;
 
-void main(List<String> args) async {
+Future<int> main(List<String> args) async {
   args = args.toList();
   assert(() {
     args.addAll([
       '-u',
-      'https://www.marxists.org/archive/mariateg/works/7-interpretive-essays/index.htm',
+      'https://www.marxists.org/archive/marx/works/1847/wage-labour/index.htm',
+      '-b',
+      'https://www.marxists.org/',
       '-s',
       '../marxists.css',
       '-d',
-      '2',
-      '-m',
-      'recording'
+      '1'
     ]);
     return true;
   }());
@@ -51,26 +51,40 @@ void main(List<String> args) async {
       defaultsTo: '1',
     )
     ..addOption(
-      'mode',
-      abbr: 'm',
-      allowed: ['recording', 'replaying', 'none'],
-      defaultsTo: 'none',
+      'rateLimit',
+      abbr: 'l',
+      help: 'The interval between requests',
+    )
+    ..addFlag(
+      'help',
+      abbr: 'h',
+      help: 'Display this menu',
     );
   final results = parser.parse(args);
+  if (results['help']) {
+    print(parser.usage);
+    return 0;
+  }
+  final rateLimit = results['rateLimit'] == null
+      ? null
+      : int.tryParse(results['rateLimit'] as String);
   final url = ArgumentError.checkNotNull(results['url'] as String);
   final baseUrl = results['baseUrl'] as String ?? p.dirname(url);
   final depth =
       int.parse(ArgumentError.checkNotNull(results['depth'] as String));
   final cssOverride = results['cssOverride'] as String;
 
-  final mode = results['mode'] as String;
+  final mode = 'none'; //results['mode'] as String;
   Hive.init(Directory.current.path);
-  Client client;
+  var client = Client();
+  if (rateLimit != null) {
+    client = RateLimitedClient(client, Duration(milliseconds: rateLimit));
+  }
   switch (mode) {
     case 'recording':
       final storage = HiveProxyClientStorage();
       await storage.init();
-      client = RecordingClient(Client(), storage);
+      client = RecordingClient(client, storage);
       break;
     case 'replaying':
       final storage = HiveProxyClientStorage();
@@ -79,7 +93,7 @@ void main(List<String> args) async {
       client = ReplayingClient(storage);
       break;
     case 'none':
-      client = Client();
+      client = client;
       break;
   }
 
@@ -107,12 +121,10 @@ void main(List<String> args) async {
       case FileSystemEntityType.directory:
         output = p.join(userDefinedOutput, output);
         break;
-      case FileSystemEntityType.file:
-        output = userDefinedOutput;
-        break;
       default:
-        throw StateError('Invalid output: $userDefinedOutput');
+        output = userDefinedOutput;
     }
   }
   await File(output).writeAsBytes(EpubWriter.writeBook(book));
+  return 0;
 }
