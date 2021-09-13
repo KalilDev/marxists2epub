@@ -17,7 +17,7 @@ import 'navigation.dart';
 const String kNcxMime = 'application/x-dtbncx+xml';
 
 extension ItE<T> on Iterable<T> {
-  T get maybeSingle => isEmpty ? null : single;
+  T get maybeSingle => length != 1 ? null : single;
 }
 
 extension StringE on String {
@@ -46,3 +46,18 @@ const contentPath = 'OEBPS';
 String withContentPath(String path) => p.join(contentPath, path);
 String idFor(String href) => p.split(p.withoutExtension(href)).join('_');
 bool hasHref(dom.Element e) => e.attributes.containsKey('href');
+final _numbersRegex = RegExp('[0-9]+');
+Uri _removeArchiveFrom(Uri uri) {
+  final components = uri.pathSegments;
+  final dateComponent = components[1];
+  if (components[0] != 'web' || !_numbersRegex.hasMatch(dateComponent)) {
+    throw StateError('Invalid web archive uri: $uri');
+  }
+  final targetUrl = uri.path.substring(
+    uri.path.indexOf(dateComponent) + dateComponent.length + 1,
+  );
+  return Uri.parse(targetUrl);
+}
+
+Uri uriOutsideOfArchiveOrg(Uri uri) =>
+    uri.host == 'web.archive.org' ? _removeArchiveFrom(uri) : uri;

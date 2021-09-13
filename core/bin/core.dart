@@ -13,13 +13,13 @@ Future<int> main(List<String> args) async {
   assert(() {
     args.addAll([
       '-u',
-      'https://www.marxists.org/archive/marx/works/1847/wage-labour/index.htm',
+      'https://web.archive.org/web/20210227093737/https://www.marxists.org/glossary/index.htm',
       '-b',
-      'https://www.marxists.org/',
+      'https://web.archive.org/web/20210227093737/https://www.marxists.org/glossary/',
       '-s',
       '../marxists.css',
       '-d',
-      '1'
+      '100000'
     ]);
     return true;
   }());
@@ -39,10 +39,10 @@ Future<int> main(List<String> args) async {
       abbr: 's',
       help: 'The file which will be used to override the style sheets',
     )
-    ..addOption(
+    ..addMultiOption(
       'baseUrl',
       abbr: 'b',
-      help: 'The base url for the documents which will be downloaded.',
+      help: 'The base urls for the documents which can be downloaded.',
     )
     ..addOption(
       'depth',
@@ -69,7 +69,8 @@ Future<int> main(List<String> args) async {
       ? null
       : int.tryParse(results['rateLimit'] as String);
   final url = ArgumentError.checkNotNull(results['url'] as String);
-  final baseUrl = results['baseUrl'] as String ?? p.dirname(url);
+  final baseUrls = (results['baseUrl'] as Iterable<String> ?? [])
+      .followedBy([p.dirname(url)]);
   final depth =
       int.parse(ArgumentError.checkNotNull(results['depth'] as String));
   final cssOverride = results['cssOverride'] as String;
@@ -98,7 +99,7 @@ Future<int> main(List<String> args) async {
   }
 
   final bookContents =
-      await fetchBook(url, withTrailingSlash(baseUrl), depth, client);
+      await fetchBook(url, baseUrls.map(withTrailingSlash), depth, client);
 
   if (cssOverride != null) {
     final css = File(cssOverride);

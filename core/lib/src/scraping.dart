@@ -244,7 +244,8 @@ class ScrapedDocument {
   Set<String> get referredImages => _referredImages ??= document
       .getElementsByTagName('img')
       .map((e) => e.attributes['src'])
-      .where((e) => e != null);
+      .where((e) => e != null)
+      .toSet();
 }
 
 ScrapedDocument scapeDocument(String contents) {

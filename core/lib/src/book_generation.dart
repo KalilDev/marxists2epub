@@ -88,7 +88,8 @@ epub.EpubNavigation _navigationFor(BookContents contents, String uid) {
           ..Content = '0'
           ..Name = 'dtb:maxPageNumber',
         epub.EpubNavigationHeadMeta()
-          ..Content = '1'
+          ..Content =
+              '2' // should be 1, but idk what else to try to fix the pagination with.
           ..Name = 'dtb:depth',
       ])
     ..NavLists = []
