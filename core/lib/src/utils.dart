@@ -38,6 +38,11 @@ String withoutHrefSection(String href) {
   return i == -1 ? href : href.substring(0, i);
 }
 
+Tuple2<String, List<String>> hrefSections(String href) {
+  final refs = href.split('#');
+  return Tuple2(refs[0], refs.skip(1).toList());
+}
+
 String startUppercased(String str) => str[0].toUpperCase() + str.substring(1);
 
 String withoutSemicolon(String str) =>
@@ -45,7 +50,19 @@ String withoutSemicolon(String str) =>
 const contentPath = 'OEBPS';
 String withContentPath(String path) => p.join(contentPath, path);
 String idFor(String href) => p.split(p.withoutExtension(href)).join('_');
+bool hasStylesheetRel(dom.Element e) => e.attributes['rel'] == 'stylesheet';
 bool hasHref(dom.Element e) => e.attributes.containsKey('href');
+bool hasSrc(dom.Element e) => e.attributes.containsKey('src');
+Iterable<dom.Element> allElements(dom.Document doc) sync* {
+  yield* doc.children;
+  yield* doc.children.expand(allChildren);
+}
+
+Iterable<dom.Element> allChildren(dom.Element parent) sync* {
+  yield* parent.children;
+  yield* parent.children.expand(allChildren);
+}
+
 final _numbersRegex = RegExp('[0-9]+');
 Uri _removeArchiveFrom(Uri uri) {
   final components = uri.pathSegments;
@@ -61,3 +78,55 @@ Uri _removeArchiveFrom(Uri uri) {
 
 Uri uriOutsideOfArchiveOrg(Uri uri) =>
     uri.host == 'web.archive.org' ? _removeArchiveFrom(uri) : uri;
+
+void fixupHtml(dom.Document doc) {
+  const disallowedAttributes = {
+    'table': {'width'},
+    'td': {'width'},
+    'img': {'align', 'hspace', 'vspace'},
+  };
+  const attributeReplacements = {
+    'img': {'border': '0'},
+  };
+  if (doc.nodes.first is dom.DocumentType) {
+    doc.nodes.first.remove();
+  }
+  if (doc.nodes.first is! dom.Comment) {
+    doc.nodes.insert(0, dom.Comment(r'?xml version="1.0" encoding="UTF-8"?'));
+  } else {
+    (doc.nodes.first as dom.Comment).data =
+        r'?xml version="1.0" encoding="UTF-8"?';
+  }
+
+  final html = doc.children.first;
+  if (html.localName != 'html') {
+    throw StateError('Invalid Document');
+  }
+  html.getElementsByTagName('meta').forEach((meta) {
+    final attrs = meta.attributes;
+    if (!attrs.containsKey("http-equiv")) {
+      return;
+    }
+    if (attrs['http-equiv'].toLowerCase() != 'content-type') {
+      return;
+    }
+    attrs['content'] = 'text/html; charset=utf-8';
+  });
+  html.attributes['xmlns'] = 'http://www.w3.org/1999/xhtml';
+
+  allElements(doc).forEach((e) {
+    final attrs = e.attributes;
+    final eDisallowedAttrs = disallowedAttributes[e.localName];
+    final eAttrReplacements = attributeReplacements[e.localName];
+    if (eDisallowedAttrs != null) {
+      attrs.removeWhere(
+        (attr, _) => eDisallowedAttrs.contains(attr),
+      );
+    }
+    if (eAttrReplacements != null) {
+      attrs.keys
+          .where(eAttrReplacements.containsKey)
+          .forEach((attr) => e.attributes[attr] = eAttrReplacements[attr]);
+    }
+  });
+}

@@ -1,6 +1,7 @@
 import 'dart:developer';
 
 import 'package:core/src/html.dart';
+import 'package:html/dom.dart' as dom;
 import 'package:core/src/utils.dart';
 import 'package:http/http.dart';
 import 'package:path/path.dart' as p;
@@ -13,7 +14,8 @@ Future<String> _fetchDocument(dynamic uri, Client client) =>
     client.get(_uriFromUriOrString(uri)).then((r) => r.body);
 
 Future<ScrapedDocument> getAndScapeIndex(dynamic index, Client client) =>
-    _fetchDocument(index, client).then(scapeDocument);
+    _fetchDocument(index, client)
+        .then((doc) => scapeDocument(_uriFromUriOrString(index), doc));
 
 final _quoteGroup = '\[\"\'\]\*';
 final _urlFnStart = '(?:url\\($_quoteGroup|)';
@@ -42,18 +44,6 @@ Future<String> _fetchAndImportCss(dynamic css, Client client) async {
   }
   return contents;
 }
-
-final _cssStylesheetStatementRegex = RegExp(
-    r'<link\s+rel="stylesheet"\s+type="text\/css"\s+href="(.*)"\s*(:?\/|)>');
-Future<String> _fetchDocAndReplaceCss(
-        dynamic uri, String targetCssPath, Client client) =>
-    _fetchDocument(uri, client) //
-        .then(
-      (contents) => contents.replaceAll(
-        _cssStylesheetStatementRegex,
-        '<link rel="stylesheet" type="text/css" href="$targetCssPath">',
-      ),
-    );
 
 Future<List<int>> _fetchBytes(dynamic uri) =>
     _client.get(_uriFromUriOrString(uri)).then((r) => r.bodyBytes);
@@ -88,14 +78,25 @@ Uri _uriDirname(Uri uri) =>
 class Context {
   final Uri baseUri;
   final Uri indexUri;
-  final Map<String, DocumentContents<String>> docs;
+  final Map<String, ScrapedDocument> docs;
   final Map<String, DocumentContents<List<int>>> images;
   final Client client;
   final Set<String> _normalizedIndexedKeys;
   final Set<Uri> _normalizedAllowedSources;
   final Uri _normalizedCssUri;
-  final Uri _normalizedNotFoundFileUri;
+
+  DocumentContents<String> __notFoundFile;
+  DocumentContents<String> get _notFoundFile =>
+      __notFoundFile ??= notFoundFile(_uriRelativePathFrom(indexUri, baseUri));
+
+  Uri __normalizedNotFoundFileUri;
+  Uri get _normalizedNotFoundFileUri => __normalizedNotFoundFileUri ??=
+      normalizeUri(baseUri.resolve(_notFoundFile.path));
+
   final Uri _normalizedBaseUri;
+
+  final Map<Uri, Uri> _replacements = {};
+  final Map<String, String> _chapters;
 
   static Uri normalizeUri(Uri uri) =>
       uriOutsideOfArchiveOrg(uri.replace(scheme: 'https').normalizePath());
@@ -106,10 +107,10 @@ class Context {
     this.docs,
     this.images,
     this.client,
+    this._chapters,
     this._normalizedIndexedKeys,
     this._normalizedAllowedSources,
     this._normalizedCssUri,
-    this._normalizedNotFoundFileUri,
     this._normalizedBaseUri,
   ) {
     final normalizedIndexUri = normalizeUri(indexUri);
@@ -122,20 +123,19 @@ class Context {
     Uri baseUri,
     Uri indexUri,
     List<Uri> allowedSources,
-    Uri notFoundFileUri,
     Uri cssUri,
     Set<Uri> indexedUris,
-    Map<String, DocumentContents<String>> docs,
-    Map<String, DocumentContents<List<int>>> images,
+    Map<String, String> chapters,
     Client client,
   ) {
     final normalizedBase = normalizeUri(baseUri);
     return Context._(
       baseUri,
       indexUri,
-      docs,
-      images,
+      {},
+      {},
       client,
+      chapters,
       indexedUris
           .map(normalizeUri)
           .where((e) => _uriIsWithin(normalizedBase, e))
@@ -144,7 +144,6 @@ class Context {
           .toSet(),
       allowedSources.map(normalizeUri).toSet(),
       normalizeUri(cssUri),
-      normalizeUri(notFoundFileUri),
       normalizeUri(baseUri),
     );
   }
@@ -171,7 +170,9 @@ class Context {
       .any((source) => _uriIsWithin(source, normalizedUri));
 
   bool isDocumentAllowed(Uri uri) =>
-      p.extension(uri.path) == '.htm' && _isInAllowedSources(normalizeUri(uri));
+      p.extension(uri.path) == '.htm' &&
+      _isInAllowedSources(normalizeUri(uri)) &&
+      (uri.isScheme('http') || uri.isScheme('https'));
   bool isImageAllowed(Uri uri) => p.extension(uri.path) != '.gif';
 
   String relativePathTo(Uri uri, {Uri from}) => _uriRelativePathFrom(
@@ -186,20 +187,20 @@ class Context {
   String notFoundPathRelativeFrom(Uri uri) =>
       relativePathTo(_normalizedNotFoundFileUri, from: normalizeUri(uri));
 
-  void insertDocPlaceholderAt(Uri docUri) {
-    final key = pathKeyFor(docUri);
+  void insertDoc(ScrapedDocument doc) {
+    final key = pathKeyFor(doc.sourceUri);
     if (docs.containsKey(key)) {
       throw StateError(
-          'Cannot insert an placeholder at $key because there is an doc there already!');
+          'Cannot insert at $key because there is an doc there already!');
     }
-    docs[key] = null;
+    docs[key] = doc;
   }
 
-  String insertImage(
+  void insertImage(
     List<int> contents, {
     @required Uri at,
   }) {
-    final key = pathKeyFor(at);
+    final key = pathKeyFor(at, isImage: true);
     if (images[key] != null) {
       throw StateError(
         'Tried inserting an image at $key with '
@@ -207,90 +208,140 @@ class Context {
       );
     }
     images[key] = DocumentContents(contents, null, key);
-    return key;
   }
 
-  void replaceDocPlaceholderWith(
-    String contents, {
-    @required Uri at,
-  }) {
-    final key = pathKeyFor(at);
-    if (!docs.containsKey(key)) {
-      throw StateError('Cannot replace an inexistent placeholder at $key!');
+  void addReplacement(Uri sourceUri, [Uri normalizedTargetUri]) {
+    final target = normalizedTargetUri ?? _normalizedNotFoundFileUri;
+    final old = _replacements[sourceUri];
+    if (old != null && old != target) {
+      throw StateError('');
     }
-    if (docs[key] != null) {
-      throw StateError(
-          'Tried replacing an placeholder at $key with contents but there are'
-          ' contents already there!');
-    }
-    docs[key] = DocumentContents(contents, null, key);
+    _replacements[sourceUri] = target;
   }
 
   bool containsIndexed(Uri uri) =>
       _normalizedIndexedKeys.contains(pathKeyFor(uri));
+  void removeChapter(String name) => _chapters.remove(name);
+  Map<String, DocumentContents<String>> buildDocs() {
+    // Replace every doc with it as an .xhtml document
+    for (final e in docs.entries.toList()) {
+      final path = e.key;
+      final doc = e.value;
+      final ext = p.extension(path);
+      if (ext != '.htm') {
+        continue;
+      }
+      final newPath = p.setExtension(path, '.xhtml');
+      if (docs.containsKey(newPath)) {
+        continue;
+      }
+      docs.remove(path);
+      docs[newPath] = doc;
+      addReplacement(baseUri.resolve(path), baseUri.resolve(newPath));
+    }
+
+    for (final doc in docs.values) {
+      final uri = doc.sourceUri;
+      doc.document
+          .getElementsByTagName('link')
+          .where(hasStylesheetRel)
+          .forEach((e) {
+        e.attributes['href'] = cssPathRelativeFrom(uri);
+      });
+      doc.document.getElementsByTagName('a').where(hasHref).forEach((e) {
+        final sections = hrefSections(e.attributes['href']);
+        final href = sections.item1;
+        var hrefUri = uri.resolve(href);
+        hrefUri = _replacements[hrefUri] ?? hrefUri;
+        hrefUri = baseUri.resolve(pathKeyFor(hrefUri));
+        final targetPath = _uriRelativePathFrom(hrefUri, uri.resolve('.'));
+        final target = [targetPath, ...sections.item2].join('#');
+        e.attributes['href'] = target;
+      });
+
+      doc.document.getElementsByTagName('img').where(hasSrc).forEach((e) {
+        final src = e.attributes['src'];
+        var srcUri = uri.resolve(src);
+        srcUri = _replacements[srcUri] ?? srcUri;
+        srcUri = baseUri.resolve(pathKeyFor(srcUri, isImage: true));
+        if (srcUri == _normalizedNotFoundFileUri) {
+          e.remove();
+          print('removed image');
+          return;
+        }
+        final targetPath = _uriRelativePathFrom(srcUri, uri.resolve('.'));
+        e.attributes['src'] = targetPath;
+      });
+      fixupHtml(doc.document);
+    }
+
+    return docs.map((key, doc) =>
+        MapEntry(key, DocumentContents(doc.document.outerHtml, null, key)))
+      ..[_notFoundFile.path] = _notFoundFile;
+  }
+
+  Map<String, String> buildChapters() => _chapters.map((k, v) {
+        var uri = indexUri.resolve(k);
+        uri = _replacements[uri] ?? uri;
+        final path = pathKeyFor(uri);
+
+        return MapEntry(path, v);
+      });
+  String indexPath() => pathKeyFor(_replacements[indexUri] ?? indexUri);
 }
 
-Future<String> _scrapeFileFetchingReferred(
-  String parentData,
-  Uri parentUri,
+Future<void> _scrapeFileFetchingReferred(
+  ScrapedDocument parent,
   Context context,
   int remainingDepth,
 ) async {
+  final parentUri = parent.sourceUri;
   print('Recursively scraping $parentUri');
-  final parent = scapeDocument(parentData);
+  // idk what should happen?
   if (parent.document.getElementsByTagName('title').maybeSingle?.text?.trim() ==
       'Wayback Machine') {
-    return parentData;
+    return;
   }
   for (final referred in parent.referredDocuments) {
     final referredUri = parentUri.resolve(referred);
-    debugger(
-        when: referredUri ==
-            Uri.parse(
-                'https://web.archive.org/web/20210227093737/https://www.marxists.org/glossary/c.htm'));
-    if (!(referredUri.isScheme('http') || referredUri.isScheme('https'))) {
-      continue;
-    }
     if (context.containsDoc(referredUri)) {
       final verb = context.containsIndexed(referredUri) ? 'indexed' : 'visited';
       print('Skipping $verb $referredUri');
-      parent.contents = parent.contents.replaceAll(
-        '"$referred"',
-        '"${_uriRelativePathFrom(referredUri, parentUri)}"',
-      );
       continue;
     }
     if (!context.isDocumentAllowed(referredUri) || remainingDepth <= 0) {
-      final relativeNotFoundFilePath =
-          context.notFoundPathRelativeFrom(referredUri);
       final message = remainingDepth <= 0
           ? 'because the depth limit was reached'
           : 'because it is not allowed';
       print('Replacing $referredUri with 404 $message');
       // Replace with 404
-      parent.contents = parent.contents.replaceAll(
-        '"$referred',
-        '"$relativeNotFoundFilePath',
-      );
+      context.addReplacement(referredUri);
       continue;
     }
     print('Fetching $parentUri child: $referredUri');
-    var referredData = await _fetchDocAndReplaceCss(
+    var referredDoc = await _fetchDocument(
       referredUri,
-      context.cssPathRelativeFrom(referredUri),
       context.client,
-    );
-    // Insert null at the target path, so that .contains returns true for self
-    context.insertDocPlaceholderAt(referredUri);
-    referredData = await _scrapeFileFetchingReferred(
-      referredData,
-      referredUri,
+    ).then((data) => scapeDocument(referredUri, data));
+    context.insertDoc(referredDoc);
+    await _scrapeFileFetchingReferred(
+      referredDoc,
       context,
       remainingDepth - 1,
     );
-    context.replaceDocPlaceholderWith(referredData, at: referredUri);
   }
-  return parent.contents;
+
+  for (final img in parent.referredImages) {
+    var imgUri = parentUri.resolve(img);
+    if (!context.isImageAllowed(imgUri)) {
+      context.addReplacement(imgUri);
+      continue;
+    }
+    print('Fetching indexed image referred at $parentUri: $imgUri');
+    final imgData = await _fetchBytes(imgUri);
+    context.insertImage(imgData, at: imgUri);
+  }
+  return;
 }
 
 Iterable<Tuple2<A, B>> _zip<A, B>(Iterable<A> a, Iterable<B> b) sync* {
@@ -314,7 +365,7 @@ Uri shallowest(Iterable<Uri> uris) {
   return uris.last.replace(pathSegments: shallowestPath);
 }
 
-const notFoundFileName = 'fileNotFound.htm';
+const notFoundFileName = 'fileNotFound.xhtml';
 DocumentContents<String> notFoundFile(String indexHref) => DocumentContents(
     html404.replaceAll('{{index}}', indexHref), null, notFoundFileName);
 Future<BookContents> fetchBook(
@@ -351,82 +402,66 @@ Future<BookContents> fetchBook(
   final targetCssUri = rootUri.resolve(targetCssPath);
   final cssFile = DocumentContents(cssData, null, targetCssPath);
 
-  final absoluteNotFoundFile =
-      notFoundFile(_uriRelativePathFrom(indexUri, rootUri));
-
-  final notFoundUri = rootUri.resolve(absoluteNotFoundFile.path);
-  idx.contents = idx.contents.replaceAll(
-    '"${idx.cssLink}"',
-    '"${_uriRelativePathFrom(targetCssUri, indexBaseUri)}"',
-  );
-  final docs = <String, DocumentContents<String>>{};
-  final images = <String, DocumentContents<List<int>>>{};
   final referredDocumentUris =
       idx.referredDocuments.map(indexBaseUri.resolve).toSet();
   final context = Context(
     rootUri,
     indexUri,
     baseUris,
-    notFoundUri,
     targetCssUri,
     referredDocumentUris,
-    docs,
-    images,
+    idx.documentChapterNameMap,
     client,
   );
 
-  // Set the index placeholder first so that it is the first one in the map.
-  context.insertDocPlaceholderAt(indexUri);
+  context.addReplacement(
+    indexUri.resolve(idx.cssLink),
+    targetCssUri,
+  );
+  // Set the index first so that it is the first one in the ordered map.
+  context.insertDoc(idx);
 
   for (final doc in idx.referredDocuments) {
-    final docUri = indexBaseUri.resolve(doc);
-    if (!(docUri.isScheme('http') || docUri.isScheme('https'))) {
-      continue;
-    }
+    final docUri = indexUri.resolve(doc); // IndexBaseUri
     if (!context.isDocumentAllowed(docUri)) {
-      final relativeNotFoundPath = context.notFoundPathRelativeFrom(docUri);
       final message = 'because it is outside the base';
       print('Replacing $docUri with 404 $message');
       // Remove the chapter and replace the url with an 404
-      idx.contents = idx.contents.replaceAll('"$doc', '"$relativeNotFoundPath');
-      idx.documentChapterNameMap.remove(doc);
+      context.addReplacement(docUri);
+      context.removeChapter(doc);
       continue;
     }
-    final relativeCssPath = context.cssPathRelativeFrom(docUri);
     print('Fetching indexed doc $docUri');
-    var docData = await _fetchDocAndReplaceCss(
+    var scrapedDoc = await _fetchDocument(
       docUri,
-      relativeCssPath,
       client,
-    );
-    context.insertDocPlaceholderAt(docUri);
-    docData = await _scrapeFileFetchingReferred(
-      docData,
-      docUri,
+    ).then((data) => scapeDocument(docUri, data));
+    context.insertDoc(scrapedDoc);
+    await _scrapeFileFetchingReferred(
+      scrapedDoc,
       context,
       depth - 1,
     );
-    context.replaceDocPlaceholderWith(docData, at: docUri);
   }
   for (final img in idx.referredImages) {
     var imgUri = indexBaseUri.resolve(img);
     if (!context.isImageAllowed(imgUri)) {
+      context.addReplacement(imgUri);
       continue;
     }
     print('Fetching indexed image $imgUri');
     final imgData = await _fetchBytes(imgUri);
-    final targetLocation = context.insertImage(imgData, at: imgUri);
-    idx.contents = idx.contents.replaceAll('"$img"', '"$targetLocation"');
+    context.insertImage(imgData, at: imgUri);
   }
-  // Set the actual document contents. This cant be done earlier because the
-  // contents string was modified.
-  context.replaceDocPlaceholderWith(idx.contents, at: indexUri);
+  // Build the book with the context
   print('Book contents fetched!');
   return BookContents(
-    docs..[absoluteNotFoundFile.path] = absoluteNotFoundFile,
-    images,
+    context.buildDocs(),
+    context.images,
     {cssFile.path: cssFile},
     idx,
     _uriRelativePathFrom(indexBaseUri, rootUri),
+    context.buildChapters(),
+    context.indexPath(),
   );
 }

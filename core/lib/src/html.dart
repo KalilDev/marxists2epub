@@ -1,9 +1,8 @@
 final html404 = '''
-<!DOCTYPE html>
-<html>
+<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>404 | Page not found.</title>
 
   <style type="text/css">

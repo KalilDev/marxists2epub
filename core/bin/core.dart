@@ -5,6 +5,8 @@ import 'package:core/src/client.dart';
 import 'package:epub/epub.dart';
 import 'package:args/args.dart';
 import 'package:hive/hive.dart';
+import 'package:html/dom.dart';
+import 'package:html/parser.dart';
 import 'package:http/http.dart';
 import 'package:path/path.dart' as p;
 
@@ -13,11 +15,7 @@ Future<int> main(List<String> args) async {
   assert(() {
     args.addAll([
       '-u',
-      'https://web.archive.org/web/20210227093737/https://www.marxists.org/glossary/index.htm',
-      '-b',
-      'https://web.archive.org/web/20210227093737/https://www.marxists.org/glossary/',
-      '-s',
-      '../marxists.css',
+      "https://www.marxists.org/archive/marx/works/1847/wage-labour/index.htm",
       '-d',
       '100000'
     ]);

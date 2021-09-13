@@ -21,11 +21,19 @@ class BookContents {
   final Map<String, DocumentContents<String>> css;
   final ScrapedDocument index;
   final String indexBasePath;
+  final String indexPath;
+  final Map<String, String> documentChapterNameMap;
 
   Iterable<DocumentContents<Object>> get allContents => htmls.values
       .cast<DocumentContents<Object>>()
       .followedBy(images.values)
       .followedBy(css.values);
+
+  String chapterNameFor(String document) =>
+      documentChapterNameMap[document] ??
+      (p.basenameWithoutExtension(document) == 'index'
+          ? 'Índice'
+          : startUppercased(idFor(document)));
 
   BookContents(
     this.htmls,
@@ -33,6 +41,8 @@ class BookContents {
     this.css,
     this.index,
     this.indexBasePath,
+    this.documentChapterNameMap,
+    this.indexPath,
   );
 }
 
@@ -122,14 +132,10 @@ class DocumentContents<T> {
 }
 
 class ScrapedDocument {
+  final Uri sourceUri;
   final dom.Document document;
-  String contents;
+  final String _contents;
 
-  String chapterNameFor(String document) =>
-      documentChapterNameMap[document] ??
-      (p.basenameWithoutExtension(document) == 'index'
-          ? 'Índice'
-          : startUppercased(idFor(document)));
   static final headerRegex = RegExp(r'h\d+');
   String _title;
   String get title => _title ??= (document.body.children
@@ -203,8 +209,9 @@ class ScrapedDocument {
   Map<String, String> get scrapedInfo => _scrapedInfo ??= _scrapeInfo();
 
   ScrapedDocument(
+    this.sourceUri,
     this.document,
-    this.contents,
+    this._contents,
   );
   String _cssLink;
 
@@ -248,7 +255,7 @@ class ScrapedDocument {
       .toSet();
 }
 
-ScrapedDocument scapeDocument(String contents) {
+ScrapedDocument scapeDocument(Uri sourceUri, String contents) {
   if (contents.contains('WAYBACK TOOLBAR INSERT')) {
     const jsStart = '<script src="//archive.org/includes/';
     const jsEnd = '<!-- End Wayback Rewrite JS Include -->';
@@ -263,6 +270,7 @@ ScrapedDocument scapeDocument(String contents) {
   }
   final index = dom_parser.parse(contents);
   return ScrapedDocument(
+    sourceUri,
     index,
     contents,
   );

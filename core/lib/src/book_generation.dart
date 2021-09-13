@@ -8,10 +8,11 @@ import 'utils.dart';
 import 'package:path/path.dart' as p;
 
 List<epub.EpubChapter> _chaptersFor(BookContents contents) {
-  final chapters = _kIndexIter
-      .followedBy(contents.index.documentChapterNameMap.keys)
+  final chapters = [contents.indexPath]
+      .followedBy(contents.documentChapterNameMap.keys)
+      .toSet()
       .map((e) => Tuple2(p.normalize(p.join(contents.indexBasePath, e)),
-          contents.index.chapterNameFor(e)));
+          contents.chapterNameFor(e)));
   return chapters
       .map((chapter) => epub.EpubChapter()
         ..Anchor = null
@@ -57,8 +58,9 @@ epub.EpubNavigation _navigationFor(BookContents contents, String uid) {
   final nav = epub.EpubNavigation();
   final navMap = epub.EpubNavigationMap()..Points = [];
   var i = 1;
-  for (final doc
-      in _kIndexIter.followedBy(contents.index.documentChapterNameMap.keys)) {
+  for (final doc in [contents.indexPath]
+      .followedBy(contents.documentChapterNameMap.keys)
+      .toSet()) {
     final point = epub.EpubNavigationPoint()
       ..PlayOrder = (i++).toString()
       ..Id = _uuid.v4()
@@ -66,7 +68,7 @@ epub.EpubNavigation _navigationFor(BookContents contents, String uid) {
       ..Content = (epub.EpubNavigationContent()
         ..Source = p.normalize(p.join(contents.indexBasePath, doc)))
       ..NavigationLabels = [
-        epub.EpubNavigationLabel()..Text = contents.index.chapterNameFor(doc)
+        epub.EpubNavigationLabel()..Text = contents.chapterNameFor(doc)
       ];
     navMap.Points.add(point);
   }
@@ -222,15 +224,13 @@ epub.EpubManifest _manifestFor(
   return manifest;
 }
 
-const _kIndexIter = ['index.htm'];
 epub.EpubSpine _spineFor(
   BookContents contents,
 ) {
   final spine = epub.EpubSpine()..Items = [];
   final ids = contents.htmls.values.map((e) => e.id);
-  final chapterIds = _kIndexIter
-      .followedBy(
-          contents.index.documentChapterNameMap.entries.map((e) => e.key))
+  final chapterIds = [contents.indexPath]
+      .followedBy(contents.documentChapterNameMap.entries.map((e) => e.key))
       .map((e) => p.normalize(p.join(contents.indexBasePath, e)))
       .map(idFor)
       .toSet();
@@ -264,7 +264,7 @@ epub.EpubGuide _guideFor(
       epub.EpubGuideReference()
         ..Href = localDt.item1
         ..Type = localDt.item2
-        ..Title = contents.index.chapterNameFor(localDt.item1),
+        ..Title = contents.chapterNameFor(localDt.item1),
     );
   }
 
