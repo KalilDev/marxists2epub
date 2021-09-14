@@ -4,6 +4,7 @@ import 'package:core/src/html.dart';
 import 'package:html/dom.dart' as dom;
 import 'package:core/src/utils.dart';
 import 'package:http/http.dart';
+import 'package:xml/xml.dart';
 import 'package:path/path.dart' as p;
 import 'package:meta/meta.dart';
 import 'package:tuple/tuple.dart';
@@ -77,7 +78,8 @@ Uri _uriDirname(Uri uri) =>
 
 class Context {
   final Uri baseUri;
-  final Uri indexUri;
+  final ScrapedDocument index;
+  Uri get indexUri => index.sourceUri;
   final Map<String, ScrapedDocument> docs;
   final Map<String, DocumentContents<List<int>>> images;
   final Client client;
@@ -85,9 +87,11 @@ class Context {
   final Set<Uri> _normalizedAllowedSources;
   final Uri _normalizedCssUri;
 
+  final DocumentContents<String> _cssFile;
+
   DocumentContents<String> __notFoundFile;
-  DocumentContents<String> get _notFoundFile =>
-      __notFoundFile ??= notFoundFile(_uriRelativePathFrom(indexUri, baseUri));
+  DocumentContents<String> get _notFoundFile => __notFoundFile ??= notFoundFile(
+      p.setExtension(_uriRelativePathFrom(indexUri, baseUri), '.xhtml'));
 
   Uri __normalizedNotFoundFileUri;
   Uri get _normalizedNotFoundFileUri => __normalizedNotFoundFileUri ??=
@@ -103,11 +107,12 @@ class Context {
 
   Context._(
     this.baseUri,
-    this.indexUri,
+    this.index,
     this.docs,
     this.images,
     this.client,
     this._chapters,
+    this._cssFile,
     this._normalizedIndexedKeys,
     this._normalizedAllowedSources,
     this._normalizedCssUri,
@@ -121,21 +126,24 @@ class Context {
   }
   factory Context(
     Uri baseUri,
-    Uri indexUri,
+    ScrapedDocument index,
     List<Uri> allowedSources,
-    Uri cssUri,
+    DocumentContents<String> css,
     Set<Uri> indexedUris,
     Map<String, String> chapters,
     Client client,
   ) {
     final normalizedBase = normalizeUri(baseUri);
-    return Context._(
+    final cssUri = index.sourceUri.resolve(index.cssLink);
+    final targetCssUri = baseUri.resolve(css.path);
+    final context = Context._(
       baseUri,
-      indexUri,
+      index,
       {},
       {},
       client,
       chapters,
+      css,
       indexedUris
           .map(normalizeUri)
           .where((e) => _uriIsWithin(normalizedBase, e))
@@ -143,9 +151,14 @@ class Context {
               _pathKeyFor(e, isImage: false, normalizedBaseUri: normalizedBase))
           .toSet(),
       allowedSources.map(normalizeUri).toSet(),
-      normalizeUri(cssUri),
+      normalizeUri(targetCssUri),
       normalizeUri(baseUri),
     );
+    context.addReplacement(
+      cssUri,
+      targetCssUri,
+    );
+    return context;
   }
 
   String pathKeyFor(Uri uri, {bool isImage = false}) => _pathKeyFor(
@@ -210,8 +223,16 @@ class Context {
     images[key] = DocumentContents(contents, null, key);
   }
 
-  void addReplacement(Uri sourceUri, [Uri normalizedTargetUri]) {
-    final target = normalizedTargetUri ?? _normalizedNotFoundFileUri;
+  Uri getUriOrReplacement(Uri uri) {
+    uri = normalizeUri(uri);
+    return _replacements[uri] ?? uri;
+  }
+
+  void addReplacement(Uri sourceUri, [Uri targetUri]) {
+    sourceUri = normalizeUri(sourceUri);
+    final target = targetUri == null
+        ? _normalizedNotFoundFileUri
+        : normalizeUri(targetUri);
     final old = _replacements[sourceUri];
     if (old != null && old != target) {
       throw StateError('');
@@ -251,18 +272,19 @@ class Context {
       doc.document.getElementsByTagName('a').where(hasHref).forEach((e) {
         final sections = hrefSections(e.attributes['href']);
         final href = sections.item1;
-        var hrefUri = uri.resolve(href);
-        hrefUri = _replacements[hrefUri] ?? hrefUri;
+        var hrefUri = getUriOrReplacement(uri.resolve(href));
         hrefUri = baseUri.resolve(pathKeyFor(hrefUri));
         final targetPath = _uriRelativePathFrom(hrefUri, uri.resolve('.'));
-        final target = [targetPath, ...sections.item2].join('#');
+        final target = [
+          targetPath,
+          if (hrefUri != _normalizedNotFoundFileUri) ...sections.item2
+        ].join('#');
         e.attributes['href'] = target;
       });
 
       doc.document.getElementsByTagName('img').where(hasSrc).forEach((e) {
         final src = e.attributes['src'];
-        var srcUri = uri.resolve(src);
-        srcUri = _replacements[srcUri] ?? srcUri;
+        var srcUri = getUriOrReplacement(uri.resolve(src));
         srcUri = baseUri.resolve(pathKeyFor(srcUri, isImage: true));
         if (srcUri == _normalizedNotFoundFileUri) {
           e.remove();
@@ -275,19 +297,66 @@ class Context {
       fixupHtml(doc.document);
     }
 
-    return docs.map((key, doc) =>
-        MapEntry(key, DocumentContents(doc.document.outerHtml, null, key)))
+    return docs.map((key, doc) => MapEntry(key,
+        DocumentContents(fixHtmlContent(doc.document.outerHtml), null, key)))
       ..[_notFoundFile.path] = _notFoundFile;
   }
 
   Map<String, String> buildChapters() => _chapters.map((k, v) {
-        var uri = indexUri.resolve(k);
-        uri = _replacements[uri] ?? uri;
+        var uri = getUriOrReplacement(indexUri.resolve(k));
         final path = pathKeyFor(uri);
 
         return MapEntry(path, v);
       });
-  String indexPath() => pathKeyFor(_replacements[indexUri] ?? indexUri);
+  String indexPath() => pathKeyFor(getUriOrReplacement(indexUri));
+  static DocumentContents<String> buildNavFile(
+      Map<String, String> chapters, String title, String cssPath) {
+    final bdr = XmlBuilder();
+    bdr.element('html', attributes: {
+      'xmlns': 'http://www.w3.org/1999/xhtml',
+      'xmlns:epub': 'http://www.idpf.org/2007/ops',
+    }, nest: () {
+      bdr.element('head', nest: () {
+        bdr.element('title', nest: title);
+        bdr.element('link', attributes: {'rel': 'stylesheet', 'href': cssPath});
+      });
+      bdr.element('body', nest: () {
+        bdr.element('nav', attributes: {'epub:type': 'toc'}, nest: () {
+          bdr.element('h1', nest: 'Índice');
+          bdr.element('ol', nest: () {
+            for (final chapter in chapters.entries) {
+              final name = chapter.value;
+              final path = chapter.key;
+              bdr.element('li', nest: () {
+                bdr.element('a', attributes: {'href': path}, nest: name);
+              });
+            }
+          });
+        });
+      });
+    });
+    const name = 'navFile.xhtml';
+    return DocumentContents(bdr.build().toXmlString(pretty: true), null, name);
+  }
+
+  BookContents buildContents(Uri indexBaseUri) {
+    final docs = buildDocs();
+    final chapters = buildChapters();
+    final navFile = buildNavFile(
+        chapters, index.title, cssPathRelativeFrom(baseUri.resolve('.')));
+    return BookContents(
+        docs,
+        images,
+        {
+          _cssFile.path: _cssFile,
+          navFile.path: navFile,
+        },
+        index,
+        _uriRelativePathFrom(indexBaseUri, baseUri),
+        chapters,
+        indexPath(),
+        navFile.path);
+  }
 }
 
 Future<void> _scrapeFileFetchingReferred(
@@ -399,24 +468,18 @@ Future<BookContents> fetchBook(
   final targetCssPath = _uriIsWithin(rootUri, cssUri)
       ? _uriRelativePathFrom(cssUri, rootUri)
       : p.join('stylesheets', p.basename(cssUri.path));
-  final targetCssUri = rootUri.resolve(targetCssPath);
   final cssFile = DocumentContents(cssData, null, targetCssPath);
 
   final referredDocumentUris =
       idx.referredDocuments.map(indexBaseUri.resolve).toSet();
   final context = Context(
     rootUri,
-    indexUri,
+    idx,
     baseUris,
-    targetCssUri,
+    cssFile,
     referredDocumentUris,
     idx.documentChapterNameMap,
     client,
-  );
-
-  context.addReplacement(
-    indexUri.resolve(idx.cssLink),
-    targetCssUri,
   );
   // Set the index first so that it is the first one in the ordered map.
   context.insertDoc(idx);
@@ -455,13 +518,5 @@ Future<BookContents> fetchBook(
   }
   // Build the book with the context
   print('Book contents fetched!');
-  return BookContents(
-    context.buildDocs(),
-    context.images,
-    {cssFile.path: cssFile},
-    idx,
-    _uriRelativePathFrom(indexBaseUri, rootUri),
-    context.buildChapters(),
-    context.indexPath(),
-  );
+  return context.buildContents(indexBaseUri);
 }

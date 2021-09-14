@@ -63,7 +63,7 @@ epub.EpubNavigation _navigationFor(BookContents contents, String uid) {
       .toSet()) {
     final point = epub.EpubNavigationPoint()
       ..PlayOrder = (i++).toString()
-      ..Id = _uuid.v4()
+      ..Id = 'navPoint-${_uuid.v4()}'
       ..ChildNavigationPoints = []
       ..Content = (epub.EpubNavigationContent()
         ..Source = p.normalize(p.join(contents.indexBasePath, doc)))
@@ -137,9 +137,7 @@ epub.EpubMetadata _metadataFor(ScrapedDocument index, String uid) {
         .toList()
     ..Coverages = []
     ..Creators = [
-      epub.EpubMetadataCreator()
-        ..Creator = index.author
-        ..Role = 'aut',
+      epub.EpubMetadataCreator()..Creator = index.author,
       ...creatorKeys
           .where(index.scrapedInfo.containsKey)
           .map((e) => epub.EpubMetadataCreator()
@@ -156,7 +154,6 @@ epub.EpubMetadata _metadataFor(ScrapedDocument index, String uid) {
     ..Identifiers = [
       epub.EpubMetadataIdentifier()
         ..Id = 'uuid_id'
-        ..Scheme = 'uuid'
         ..Identifier = uid
     ]
     ..Languages = ['en']
@@ -216,7 +213,8 @@ epub.EpubManifest _manifestFor(
   manifest.Items.addAll(contents.allContents.map((e) => epub.EpubManifestItem()
     ..Id = e.id
     ..Href = e.path
-    ..MediaType = e.mimeType));
+    ..MediaType = e.mimeType
+    ..Properties = contents.navFilePath == e.path ? 'nav' : null));
   manifest.Items.add(epub.EpubManifestItem()
     ..Id = idFor(tocPath)
     ..Href = tocPath
@@ -230,17 +228,17 @@ epub.EpubSpine _spineFor(
   final spine = epub.EpubSpine()..Items = [];
   final ids = contents.htmls.values.map((e) => e.id);
   final chapterIds = [contents.indexPath]
+      .followedBy([if (contents.navFilePath != null) contents.navFilePath])
       .followedBy(contents.documentChapterNameMap.entries.map((e) => e.key))
       .map((e) => p.normalize(p.join(contents.indexBasePath, e)))
       .map(idFor)
       .toSet();
-  spine.Items.addAll(ids.map(
-    (e) => epub.EpubSpineItemRef()
-      ..IdRef = e
-      // The write logic is flipped on package:epub, the condition
-      // needs to be negated for the correct behavior.
-      ..IsLinear = !chapterIds.contains(e), // FIXXXX
-  ));
+  spine.Items.addAll(ids.map((e) => epub.EpubSpineItemRef()
+        ..IdRef = e
+        // The write logic is flipped on package:epub, the condition
+        // needs to be negated for the correct behavior.
+        ..IsLinear = null //!chapterIds.contains(e), // FIXXXX
+      ));
   spine.TableOfContents = 'toc';
   return spine;
 }
@@ -254,6 +252,10 @@ epub.EpubGuide _guideFor(
     Tuple2('preface.htm', 'preface'),
     Tuple2('intro.htm', 'text'),
     Tuple2('author.htm', 'other.author'),
+    Tuple2('index.xhtml', 'index'),
+    Tuple2('preface.xhtml', 'preface'),
+    Tuple2('intro.xhtml', 'text'),
+    Tuple2('author.xhtml', 'other.author'),
   ];
   final localDocNamesAndTypes = docNamesAndTypes.map(
       (e) => e.withItem1(p.normalize(p.join(contents.indexBasePath, e.item1))));

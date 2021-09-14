@@ -1,4 +1,5 @@
 import 'dart:collection';
+import 'dart:developer';
 import 'dart:io';
 import 'epub_exports.dart' as epub;
 import 'package:core/src/html.dart';
@@ -97,6 +98,7 @@ void fixupHtml(dom.Document doc) {
     (doc.nodes.first as dom.Comment).data =
         r'?xml version="1.0" encoding="UTF-8"?';
   }
+  doc.nodes.insert(0, dom.DocumentType("html", null, null));
 
   final html = doc.children.first;
   if (html.localName != 'html') {
@@ -129,4 +131,11 @@ void fixupHtml(dom.Document doc) {
           .forEach((attr) => e.attributes[attr] = eAttrReplacements[attr]);
     }
   });
+}
+
+final _entityRegex = RegExp(r'(&[a-z]+?;)');
+String fixHtmlContent(String text) {
+  const entityReplacements = {'nbsp': r'&#160;'};
+  return text.splitMapJoin(_entityRegex,
+      onMatch: (m) => entityReplacements[m.group(1)] ?? '');
 }

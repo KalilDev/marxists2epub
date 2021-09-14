@@ -23,6 +23,7 @@ class BookContents {
   final String indexBasePath;
   final String indexPath;
   final Map<String, String> documentChapterNameMap;
+  final String navFilePath;
 
   Iterable<DocumentContents<Object>> get allContents => htmls.values
       .cast<DocumentContents<Object>>()
@@ -43,6 +44,7 @@ class BookContents {
     this.indexBasePath,
     this.documentChapterNameMap,
     this.indexPath,
+    this.navFilePath,
   );
 }
 
@@ -138,14 +140,15 @@ class ScrapedDocument {
 
   static final headerRegex = RegExp(r'h\d+');
   String _title;
-  String get title => _title ??= (document.body.children
-          .skip(1)
-          .map((e) => e.text)
-          .takeWhile(headerRegex.hasMatch)
-          .join(' ')
-          .trim()
-          .nonEmpty ??
-      document.getElementsByTagName('title').single.text);
+  String get title => _title ??= (document.body?.children
+          ?.skip(1)
+          ?.map((e) => e.text)
+          ?.takeWhile(headerRegex.hasMatch)
+          ?.join(' ')
+          ?.trim()
+          ?.nonEmpty ??
+      document.getElementsByTagName('title').maybeSingle?.text ??
+      'Unknown Title');
 
   String _author;
   String get author => _author ??= document
@@ -154,7 +157,8 @@ class ScrapedDocument {
           .maybeSingle
           ?.attributes
           ?.get('content') ??
-      document.body.children.first.text;
+      document.body?.children?.first?.text ??
+      'Unknown Author';
 
   static Iterable<MapEntry<String, String>> _parseInfo(dom.Element info) sync* {
     for (var i = 0; i < info.nodes.length; i++) {
