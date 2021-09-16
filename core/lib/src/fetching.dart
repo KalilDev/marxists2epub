@@ -193,6 +193,8 @@ class Context {
 
   bool containsDoc(Uri docUri) =>
       docs.containsKey(pathKeyFor(docUri)) || containsIndexed(docUri);
+  bool containsImage(Uri imgUri) =>
+      images.containsKey(pathKeyFor(imgUri, isImage: true));
 
   String cssPathRelativeFrom(Uri uri) =>
       relativePathTo(_normalizedCssUri, from: normalizeUri(uri));
@@ -366,7 +368,7 @@ Future<void> _scrapeFileFetchingReferred(
 ) async {
   final parentUri = parent.sourceUri;
   print('Recursively scraping $parentUri');
-  // idk what should happen?
+  // idk what should happen? it shouldnt have been fetched?
   if (parent.document.getElementsByTagName('title').maybeSingle?.text?.trim() ==
       'Wayback Machine') {
     return;
@@ -385,6 +387,11 @@ Future<void> _scrapeFileFetchingReferred(
       print('Replacing $referredUri with 404 $message');
       // Replace with 404
       context.addReplacement(referredUri);
+      // If we are at the first level, the doc was in the index, so it is an
+      // chapter that may be removed.
+      if (parent == context.index) {
+        context.removeChapter(referred);
+      }
       continue;
     }
     print('Fetching $parentUri child: $referredUri');
@@ -406,10 +413,14 @@ Future<void> _scrapeFileFetchingReferred(
       context.addReplacement(imgUri);
       continue;
     }
+    if (context.containsImage(imgUri)) {
+      continue;
+    }
     print('Fetching indexed image referred at $parentUri: $imgUri');
     final imgData = await _fetchBytes(imgUri);
     context.insertImage(imgData, at: imgUri);
   }
+
   return;
 }
 
@@ -449,9 +460,9 @@ Future<BookContents> fetchBook(
   final indexBaseUri = _uriDirname(indexUri);
   final baseUris = baseUrls.map((e) => Uri.parse(e)).toList();
   final rootUri = shallowest(baseUris);
-  if (p.basename(indexUri.path) != 'index.htm') {
+  /*if (p.basename(indexUri.path) != 'index.htm') {
     throw StateError('The index url must end with `index.htm`');
-  }
+  }*/
   if (!_uriIsWithin(rootUri, indexUri)) {
     throw StateError(
         'The index `$indexUri` is not contained in the base $rootUri!');
@@ -483,39 +494,7 @@ Future<BookContents> fetchBook(
   );
   // Set the index first so that it is the first one in the ordered map.
   context.insertDoc(idx);
-
-  for (final doc in idx.referredDocuments) {
-    final docUri = indexUri.resolve(doc); // IndexBaseUri
-    if (!context.isDocumentAllowed(docUri)) {
-      final message = 'because it is outside the base';
-      print('Replacing $docUri with 404 $message');
-      // Remove the chapter and replace the url with an 404
-      context.addReplacement(docUri);
-      context.removeChapter(doc);
-      continue;
-    }
-    print('Fetching indexed doc $docUri');
-    var scrapedDoc = await _fetchDocument(
-      docUri,
-      client,
-    ).then((data) => scapeDocument(docUri, data));
-    context.insertDoc(scrapedDoc);
-    await _scrapeFileFetchingReferred(
-      scrapedDoc,
-      context,
-      depth - 1,
-    );
-  }
-  for (final img in idx.referredImages) {
-    var imgUri = indexBaseUri.resolve(img);
-    if (!context.isImageAllowed(imgUri)) {
-      context.addReplacement(imgUri);
-      continue;
-    }
-    print('Fetching indexed image $imgUri');
-    final imgData = await _fetchBytes(imgUri);
-    context.insertImage(imgData, at: imgUri);
-  }
+  await _scrapeFileFetchingReferred(idx, context, depth);
   // Build the book with the context
   print('Book contents fetched!');
   return context.buildContents(indexBaseUri);

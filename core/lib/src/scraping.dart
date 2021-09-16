@@ -221,12 +221,14 @@ class ScrapedDocument {
 
   /// Find the single css link. Throws if there aren't any or there are
   /// more than one
+  // uses an bogus one
   String get cssLink => _cssLink ??= document
-      .getElementsByTagName('link')
-      .where((e) => e.attributes['rel'] == 'stylesheet')
-      .where(hasHref)
-      .map((e) => e.attributes['href'])
-      .single;
+          .getElementsByTagName('link')
+          .where((e) => e.attributes['rel'] == 'stylesheet')
+          .where(hasHref)
+          .map((e) => e.attributes['href'])
+          .maybeSingle ??
+      'style.css';
 
   Map<String, String> _documentChapterNameMap;
 

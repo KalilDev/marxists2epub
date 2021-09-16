@@ -118,12 +118,17 @@ Future<int> main(List<String> args) async {
     final type = await FileSystemEntity.type(userDefinedOutput);
     switch (type) {
       case FileSystemEntityType.directory:
-        output = p.join(userDefinedOutput, output);
+        output = p.join(userDefinedOutput, removeSlashes(output));
         break;
       default:
-        output = userDefinedOutput;
+        output = removeSlashes(userDefinedOutput);
     }
+  } else {
+    output = removeSlashes(output);
   }
   await File(output).writeAsBytes(EpubWriter.writeBook(book));
+  print('Saved the book to $output!');
   return 0;
 }
+
+String removeSlashes(String s) => s.replaceAll(r'/', '_');
