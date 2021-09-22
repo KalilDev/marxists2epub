@@ -1,5 +1,8 @@
+import 'dart:async';
 import 'dart:developer';
+import 'dart:typed_data';
 
+import 'package:core/core.dart';
 import 'package:core/src/html.dart';
 import 'package:html/dom.dart' as dom;
 import 'package:core/src/utils.dart';
@@ -11,11 +14,25 @@ import 'package:tuple/tuple.dart';
 import 'scraping.dart';
 
 final _client = Client();
-Future<String> _fetchDocument(dynamic uri, Client client) =>
+Future<String> _fetchDocument(
+  dynamic uri,
+  Client client,
+  Sink<FetchProgress> progress,
+) =>
     client.get(_uriFromUriOrString(uri)).then((r) => r.body);
+Future<Uint8List> _fetchImage(
+  dynamic uri,
+  Client client,
+  Sink<FetchProgress> progress,
+) =>
+    client.get(_uriFromUriOrString(uri)).then((r) => r.bodyBytes);
 
-Future<ScrapedDocument> getAndScapeIndex(dynamic index, Client client) =>
-    _fetchDocument(index, client)
+Future<ScrapedDocument> getAndScapeIndex(
+  dynamic index,
+  Client client,
+  Sink<FetchProgress> progress,
+) =>
+    _fetchDocument(index, client, progress)
         .then((doc) => scapeDocument(_uriFromUriOrString(index), doc));
 
 final _quoteGroup = '\[\"\'\]\*';
@@ -100,10 +117,14 @@ class Context {
   final Uri _normalizedBaseUri;
 
   final Map<Uri, Uri> _replacements = {};
+  final Map<Uri, Uri> _maybeReplacements = {};
   final Map<String, String> _chapters;
 
   static Uri normalizeUri(Uri uri) =>
       uriOutsideOfArchiveOrg(uri.replace(scheme: 'https').normalizePath());
+  final Sink<BookEvent> _eventSink;
+
+  void addEvent(BookEvent e) => _eventSink?.add(e);
 
   Context._(
     this.baseUri,
@@ -117,6 +138,7 @@ class Context {
     this._normalizedAllowedSources,
     this._normalizedCssUri,
     this._normalizedBaseUri,
+    this._eventSink,
   ) {
     final normalizedIndexUri = normalizeUri(indexUri);
     assert(_uriIsWithin(_normalizedBaseUri, normalizedIndexUri));
@@ -132,6 +154,7 @@ class Context {
     Set<Uri> indexedUris,
     Map<String, String> chapters,
     Client client,
+    Sink<BookEvent> eventSink,
   ) {
     final normalizedBase = normalizeUri(baseUri);
     final cssUri = index.sourceUri.resolve(index.cssLink);
@@ -153,6 +176,7 @@ class Context {
       allowedSources.map(normalizeUri).toSet(),
       normalizeUri(targetCssUri),
       normalizeUri(baseUri),
+      eventSink,
     );
     context.addReplacement(
       cssUri,
@@ -209,6 +233,7 @@ class Context {
           'Cannot insert at $key because there is an doc there already!');
     }
     docs[key] = doc;
+    _maybeReplacements.remove(normalizeUri(doc.sourceUri));
   }
 
   void insertImage(
@@ -227,7 +252,25 @@ class Context {
 
   Uri getUriOrReplacement(Uri uri) {
     uri = normalizeUri(uri);
-    return _replacements[uri] ?? uri;
+    return _replacements[uri] ?? _maybeReplacements[uri] ?? uri;
+  }
+
+  void maybeAddReplacement(Uri sourceUri, [Uri targetUri]) {
+    sourceUri = normalizeUri(sourceUri);
+    if (_replacements[sourceUri] != null) {
+      return;
+    }
+    if (containsDoc(sourceUri) || containsImage(sourceUri)) {
+      return;
+    }
+    final target = targetUri == null
+        ? _normalizedNotFoundFileUri
+        : normalizeUri(targetUri);
+    final old = _maybeReplacements[sourceUri];
+    if (old != null && old != target) {
+      throw StateError('');
+    }
+    _maybeReplacements[sourceUri] = target;
   }
 
   void addReplacement(Uri sourceUri, [Uri targetUri]) {
@@ -367,26 +410,28 @@ Future<void> _scrapeFileFetchingReferred(
   int remainingDepth,
 ) async {
   final parentUri = parent.sourceUri;
-  print('Recursively scraping $parentUri');
   // idk what should happen? it shouldnt have been fetched?
   if (parent.document.getElementsByTagName('title').maybeSingle?.text?.trim() ==
       'Wayback Machine') {
     return;
   }
-  for (final referred in parent.referredDocuments) {
+  for (final referred in remainingDepth <= 0 ? [] : parent.referredDocuments) {
     final referredUri = parentUri.resolve(referred);
     if (context.containsDoc(referredUri)) {
-      final verb = context.containsIndexed(referredUri) ? 'indexed' : 'visited';
-      print('Skipping $verb $referredUri');
-      continue;
+      final indexed = context.containsIndexed(referredUri);
+      // If we arent at the index, skip the indexed and otherwise books
+      if (!(parent == context.index && indexed)) {
+        context.addEvent(Skipped(indexed, referredUri));
+        continue;
+      }
     }
     if (!context.isDocumentAllowed(referredUri) || remainingDepth <= 0) {
-      final message = remainingDepth <= 0
+      final reason = remainingDepth <= 0
           ? 'because the depth limit was reached'
           : 'because it is not allowed';
-      print('Replacing $referredUri with 404 $message');
-      // Replace with 404
-      context.addReplacement(referredUri);
+      // Maybe replace with 404
+      context.maybeAddReplacement(referredUri);
+      context.addEvent(Ignored(reason, referredUri));
       // If we are at the first level, the doc was in the index, so it is an
       // chapter that may be removed.
       if (parent == context.index) {
@@ -394,11 +439,22 @@ Future<void> _scrapeFileFetchingReferred(
       }
       continue;
     }
-    print('Fetching $parentUri child: $referredUri');
+    final fetchController = StreamController<FetchProgress>();
+    context.addEvent(Fetch(
+      fetchController.stream,
+      referredUri,
+      parent: parentUri,
+    ));
+
     var referredDoc = await _fetchDocument(
       referredUri,
       context.client,
+      fetchController.sink,
     ).then((data) => scapeDocument(referredUri, data));
+
+    context.addEvent(FetchComplete(referredUri));
+    await fetchController.close();
+
     context.insertDoc(referredDoc);
     await _scrapeFileFetchingReferred(
       referredDoc,
@@ -416,8 +472,20 @@ Future<void> _scrapeFileFetchingReferred(
     if (context.containsImage(imgUri)) {
       continue;
     }
-    print('Fetching indexed image referred at $parentUri: $imgUri');
-    final imgData = await _fetchBytes(imgUri);
+    final fetchController = StreamController<FetchProgress>();
+    context.addEvent(Fetch(
+      fetchController.stream,
+      imgUri,
+      parent: parentUri,
+    ));
+
+    var imgData = await _fetchImage(
+      imgUri,
+      context.client,
+      fetchController.sink,
+    );
+
+    context.addEvent(FetchComplete(imgUri));
     context.insertImage(imgData, at: imgUri);
   }
 
@@ -451,7 +519,8 @@ DocumentContents<String> notFoundFile(String indexHref) => DocumentContents(
 Future<BookContents> fetchBook(
   String indexUrl,
   Iterable<String> baseUrls,
-  int depth, [
+  int depth,
+  Sink<BookEvent> eventSink, [
   Client client,
 ]) async {
   client ??= _client;
@@ -471,7 +540,18 @@ Future<BookContents> fetchBook(
     throw StateError('The depth is invalid. The minimum allowed depth is 1');
   }
 
-  final idx = await getAndScapeIndex(indexUri, client);
+  final indexFetchController = StreamController<FetchProgress>();
+  eventSink.add(Fetch(indexFetchController.stream, indexUri));
+
+  final idx = await getAndScapeIndex(
+    indexUri,
+    client,
+    indexFetchController.sink,
+  );
+
+  eventSink.add(FetchComplete(indexUri));
+  await indexFetchController.close();
+  eventSink.add(IndexFetched(idx));
 
   final cssUri = indexBaseUri.resolve(idx.cssLink);
 
@@ -491,11 +571,103 @@ Future<BookContents> fetchBook(
     referredDocumentUris,
     idx.documentChapterNameMap,
     client,
+    eventSink,
   );
   // Set the index first so that it is the first one in the ordered map.
   context.insertDoc(idx);
-  await _scrapeFileFetchingReferred(idx, context, depth);
+  await _scrapeFileFetchingReferred(idx, context, depth + 1);
   // Build the book with the context
-  print('Book contents fetched!');
-  return context.buildContents(indexBaseUri);
+  context.addEvent(BookFetched());
+  final book = context.buildContents(indexBaseUri);
+  context.addEvent(BookContentsCreated());
+  return book;
+}
+
+abstract class BookEvent {}
+
+class Fetch implements BookEvent {
+  final Stream<FetchProgress> progress;
+  final Uri uri;
+  final Uri parent;
+
+  Fetch(this.progress, this.uri, {this.parent});
+}
+
+class FetchComplete implements BookEvent {
+  final Uri uri;
+
+  FetchComplete(this.uri);
+}
+
+class Skipped implements BookEvent {
+  final bool indexed;
+  final Uri uri;
+
+  Skipped(this.indexed, this.uri);
+}
+
+class Ignored implements BookEvent {
+  final String reason;
+  final Uri uri;
+  final Uri parent;
+
+  Ignored(this.reason, this.uri, {this.parent});
+}
+
+class BookFetched implements BookEvent {
+  BookFetched();
+}
+
+class BookContentsCreated implements BookEvent {
+  BookContentsCreated();
+}
+
+class EpubCreated implements BookEvent {
+  EpubCreated();
+}
+
+class IndexFetched implements BookEvent {
+  final ScrapedDocument index;
+  IndexFetched(this.index);
+}
+
+class FetchProgress {
+  final Uri source;
+  final int length;
+  final int downloaded;
+
+  FetchProgress(this.source, this.length, this.downloaded);
+}
+
+class FetchProgressClient extends BaseClient {
+  final Client parent;
+  final Sink<FetchProgress> sink;
+
+  FetchProgressClient(this.parent, this.sink);
+
+  @override
+  Future<StreamedResponse> send(BaseRequest request) async {
+    final response = await parent.send(request);
+    var length = response.contentLength;
+    var downloaded = 0;
+    void send() {
+      sink.add(FetchProgress(request.url, length, downloaded));
+    }
+
+    send();
+    return StreamedResponse(
+      response.stream.map((bytes) {
+        downloaded += bytes.length;
+        send();
+        return bytes;
+      }),
+      response.statusCode,
+      contentLength: response.contentLength,
+      request: response.request,
+      headers: response.headers,
+      isRedirect: response.isRedirect,
+      persistentConnection: response.persistentConnection,
+      reasonPhrase: response.reasonPhrase,
+    );
+  }
 }
