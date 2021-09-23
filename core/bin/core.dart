@@ -41,6 +41,11 @@ void Function(BookEvent e) _onEvent(LogPreferences p) {
       state.item3.cancel();
       print('FETCHED: ${e.uri}');
     }
+    if (e is FetchFailed) {
+      final state = fetches.remove(e.uri);
+      state.item3.cancel();
+      print('FAILED : ${e.uri}: ${e.exception}');
+    }
     if (e is Skipped) {
       if (!p.showSkipped) {
         return;
@@ -74,9 +79,12 @@ class GlobalSettings {
   final int rateLimit;
   final LogPreferences logPrefs;
   final String outputFolder;
+  final bool parallel;
+  final bool images;
+  final bool stripCss;
 
-  GlobalSettings(
-      this.cssOverride, this.rateLimit, this.logPrefs, this.outputFolder);
+  GlobalSettings(this.cssOverride, this.rateLimit, this.logPrefs,
+      this.outputFolder, this.parallel, this.images, this.stripCss);
 }
 
 class SingleRequest {
@@ -94,7 +102,11 @@ Future<int> main(List<String> args) async {
   args = args.toList();
   assert(() {
     args = [
-      'https://www.marxists.org/reference/archive/stalin/works/1938/09.htm'
+      'https://www.marxists.org/archive/lenin/works/1916/imp-hsc',
+      '-S',
+      '-F',
+      '-I',
+      '-P',
     ];
     return true;
   }());
@@ -113,6 +125,9 @@ Future<int> main(List<String> args) async {
     ..addFlag('logSkipped', abbr: 'S', defaultsTo: false)
     ..addFlag('showFetch', abbr: 'F', defaultsTo: true)
     ..addFlag('logIgnored', abbr: 'I', defaultsTo: false)
+    ..addFlag('parallel', abbr: 'P', defaultsTo: false)
+    ..addFlag('images', abbr: 'G', defaultsTo: true)
+    ..addFlag('stripCss', abbr: 'T', defaultsTo: false)
     ..addFlag(
       'help',
       abbr: 'h',
@@ -157,17 +172,24 @@ Future<int> main(List<String> args) async {
     rateLimit,
     logPrefs,
     results['outputFolder'],
+    results['parallel'],
+    results['images'],
+    results['stripCss'],
   );
 
   final requests = divideRequests(results.rest).map(singleParser.parse).map(
-        (e) => SingleRequest(
-            globalPrefs,
-            e.rest.single,
-            e['output'] as String,
-            (e['baseUrl'] as Iterable<String> ?? [])
-                .followedBy([p.dirname(e.rest.single)]).toList(),
-            int.parse(ArgumentError.checkNotNull(e['depth'], 'depth'))),
-      );
+    (e) {
+      var url = e.rest.single;
+      url = p.extension(url) == '.htm' ? url : p.join(url, 'index.htm');
+      return SingleRequest(
+          globalPrefs,
+          url,
+          e['output'] as String,
+          (e['baseUrl'] as Iterable<String> ?? [])
+              .followedBy([p.dirname(url)]).toList(),
+          int.parse(ArgumentError.checkNotNull(e['depth'], 'depth')));
+    },
+  );
   if (requests.isEmpty) {
     print('No requests were defined!!');
     return 1;
@@ -216,6 +238,9 @@ Future<void> processRequest(
     request.depth,
     eventController,
     client,
+    request.settings.parallel,
+    request.settings.images,
+    request.settings.stripCss,
   );
 
   if (request.settings.cssOverride != null) {
@@ -258,23 +283,7 @@ Future<void> processRequest(
 String removeSlashes(String s) => s.replaceAll(r'/', '_');
 
 Iterable<List<String>> divideRequests(List<String> notParsed) sync* {
-  var acc = <String>[];
-  var needsArg = false;
-  for (final e in notParsed) {
-    acc.add(e);
-    if (e.startsWith('-')) {
-      needsArg = true;
-      continue;
-    }
-    if (needsArg) {
-      needsArg = false;
-      continue;
-    }
-    // e is the url
-    yield acc;
-    acc = [];
-  }
-  if (acc.isNotEmpty) {
-    yield acc;
+  for (final line in notParsed) {
+    yield line.split(';').toList();
   }
 }
