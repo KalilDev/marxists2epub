@@ -1,8 +1,6 @@
 import 'dart:async';
 import 'dart:collection';
-import 'dart:io';
 import 'dart:isolate';
-import 'package:tuple/tuple.dart';
 
 import '../core.dart';
 import 'book_generation.dart';
