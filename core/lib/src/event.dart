@@ -6,7 +6,7 @@ abstract class BookEvent {}
 class Fetch implements BookEvent {
   final Stream<FetchProgress> progress;
   final Uri uri;
-  final Uri parent;
+  final Uri? parent;
 
   Fetch(this.progress, this.uri, {this.parent});
 }
@@ -34,7 +34,7 @@ class Skipped implements BookEvent {
 class Ignored implements BookEvent {
   final String reason;
   final Uri uri;
-  final Uri parent;
+  final Uri? parent;
 
   Ignored(this.reason, this.uri, {this.parent});
 }

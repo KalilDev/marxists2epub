@@ -23,8 +23,10 @@ void writeHead(EpubNavigationHead head, XmlBuilder builder) {
   builder.element('head', nest: () {
     for (final e in head.Metadata) {
       builder.element('meta', nest: () {
+        if (e.Content != null) {
+          builder..attribute('content', e.Content!);
+        }
         builder
-          ..attribute('content', e.Content)
           ..attribute('name', e.Name)
           ..maybeAttribute('scheme', e.Scheme);
       });
@@ -116,5 +118,5 @@ void writePageList(EpubNavigationPageList pageList, XmlBuilder builder) {
 String navigationToXmlString(EpubNavigation nav) {
   final bdr = XmlBuilder();
   writeNavigation(nav, bdr);
-  return bdr.build().toXmlString(pretty: true);
+  return bdr.buildDocument().toXmlString(pretty: true);
 }

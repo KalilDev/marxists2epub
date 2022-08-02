@@ -7,7 +7,7 @@ import 'package:mime/src/default_extension_map.dart';
 import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as dom_parser;
 import 'package:http/http.dart';
-import 'package:tuple/tuple.dart';
+import 'package:utils/utils.dart';
 import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
 import 'package:xml/xml.dart';
@@ -50,12 +50,12 @@ class BookContents {
 
 class DocumentContents<T> {
   final T contents;
-  String _mimeType;
+  String? _mimeType;
   final String path;
 
   DocumentContents(
     this.contents,
-    String mimeType,
+    String? mimeType,
     this.path,
   ) : _mimeType = mimeType;
   String _computeMimeType() {
@@ -63,12 +63,12 @@ class DocumentContents<T> {
       return lookupMimeType(path,
           headerBytes: (contents as List<int>)
               .take(defaultMagicNumbersMaxLength)
-              .toList());
+              .toList())!;
     }
     if (contents is String) {
       return p.extension(path) == '.htm'
-          ? defaultExtensionMap['xhtml']
-          : lookupMimeType(path);
+          ? defaultExtensionMap['xhtml']!
+          : lookupMimeType(path)!;
     }
     throw TypeError();
   }
@@ -139,25 +139,25 @@ class ScrapedDocument {
   final String _contents;
 
   static final headerRegex = RegExp(r'h\d+');
-  String _title;
+  String? _title;
   String get title => _title ??= (document.body?.children
-          ?.skip(1)
-          ?.map((e) => e.text)
-          ?.takeWhile(headerRegex.hasMatch)
-          ?.join(' ')
-          ?.trim()
-          ?.nonEmpty ??
+          .skip(1)
+          .map((e) => e.text)
+          .takeWhile(headerRegex.hasMatch)
+          .join(' ')
+          .trim()
+          .nonEmpty ??
       document.getElementsByTagName('title').maybeSingle?.text ??
       'Unknown Title');
 
-  String _author;
+  String? _author;
   String get author => _author ??= document
           .getElementsByTagName('meta')
           .where((e) => e.attributes['name'] == 'author')
           .maybeSingle
           ?.attributes
-          ?.get('content') ??
-      document.body?.children?.first?.text ??
+          .get('content') ??
+      document.body?.children.first.text ??
       'Unknown Author';
 
   static Iterable<MapEntry<String, String>> _parseInfo(dom.Element info) sync* {
@@ -180,20 +180,19 @@ class ScrapedDocument {
           valAcc.write(node.text);
           continue;
         }
-        final element = node as dom.Element;
-        switch (element.localName) {
+        switch (node.localName) {
           case 'br':
             valAcc.writeln();
             break;
           case 'span':
-            if (element.attributes['class'] == 'info') {
+            if (node.attributes['class'] == 'info') {
               i--;
               break loop;
             }
-            valAcc.write(element.innerHtml);
+            valAcc.write(node.innerHtml);
             break;
           default:
-            valAcc.write(element.innerHtml);
+            valAcc.write(node.innerHtml);
             break;
         }
       }
@@ -209,7 +208,7 @@ class ScrapedDocument {
     return Map.fromEntries(result);
   }
 
-  Map<String, String> _scrapedInfo;
+  Map<String, String>? _scrapedInfo;
   Map<String, String> get scrapedInfo => _scrapedInfo ??= _scrapeInfo();
 
   ScrapedDocument(
@@ -217,7 +216,7 @@ class ScrapedDocument {
     this.document,
     this._contents,
   );
-  String _cssLink;
+  String? _cssLink;
 
   /// Find the single css link. Throws if there aren't any or there are
   /// more than one
@@ -230,7 +229,7 @@ class ScrapedDocument {
           .maybeSingle ??
       'style.css';
 
-  Map<String, String> _documentChapterNameMap;
+  Map<String, String>? _documentChapterNameMap;
 
   /// Scrape the anchors and find the chapters. Only valid for some index.htm
   /// documents
@@ -238,26 +237,27 @@ class ScrapedDocument {
       _documentChapterNameMap ??= Map.fromEntries(document
           .getElementsByTagName('a')
           .where(hasHref)
-          .where((e) => !hasHrefSection(e.attributes['href']))
+          .where((e) => !hasHrefSection(e.attributes['href']!))
           .where(isPartOfTOC)
-          .map((e) => MapEntry(e.attributes['href'], e.text)));
-  Set<String> _referredDocuments;
+          .map((e) => MapEntry(e.attributes['href']!, e.text)));
+  Set<String>? _referredDocuments;
 
   /// Scrape the anchors.
   Set<String> get referredDocuments => _referredDocuments ??= document
       .getElementsByTagName('a')
       .where(hasHref)
-      .map((e) => e.attributes['href'])
+      .map((e) => e.attributes['href']!)
       .map(withoutHrefSection)
       .toSet();
 
-  Set<String> _referredImages;
+  Set<String>? _referredImages;
 
   /// Scrape the img elements
   Set<String> get referredImages => _referredImages ??= document
       .getElementsByTagName('img')
       .map((e) => e.attributes['src'])
       .where((e) => e != null)
+      .cast<String>()
       .toSet();
 }
 

@@ -54,10 +54,10 @@ class EbookIsolate {
   EbookIsolate._() {
     _isolateStreamSubs = _isolateStream.listen(_onIsolateMessage);
   }
-  Isolate _isolate;
+  Isolate? _isolate;
   final _isolateStream = ReceivePort('Main port EbookIsolate');
-  StreamSubscription _isolateStreamSubs;
-  SendPort _isolateSink;
+  late StreamSubscription _isolateStreamSubs;
+  late SendPort _isolateSink;
 
   IsolateStatus status = IsolateStatus.starting;
 
@@ -70,17 +70,17 @@ class EbookIsolate {
       _maybeSendNextRequest();
     }
     if (data is _BookEvent) {
-      _jobState[data.identity].eventsController.add(data.event);
+      _jobState[data.identity]!.eventsController.add(data.event);
     }
     if (data is _CompleteErrorEvent) {
-      _jobState[data.identity].epubCompleter.completeError(data.error);
-      await _jobState.remove(data.identity).close();
+      _jobState[data.identity]!.epubCompleter.completeError(data.error);
+      await _jobState.remove(data.identity)!.close();
       status = IsolateStatus.idle;
       _maybeSendNextRequest();
     }
     if (data is _CompleteSuccessEvent) {
-      _jobState[data.identity].epubCompleter.complete(data.data);
-      await _jobState.remove(data.identity).close();
+      _jobState[data.identity]!.epubCompleter.complete(data.data);
+      await _jobState.remove(data.identity)!.close();
       status = IsolateStatus.idle;
       _maybeSendNextRequest();
     }
@@ -109,7 +109,7 @@ class EbookIsolate {
   final Map<Capability, _MainJobState> _jobState = {};
 
   Future<void> dispose() async {
-    _isolate.kill(priority: Isolate.immediate);
+    _isolate?.kill(priority: Isolate.immediate);
     for (final e in _jobState.values) {
       e.epubCompleter
           .completeError(StateError('Isolate disposed before completion'));
@@ -207,8 +207,8 @@ class _EbookIsolate {
     _mainStreamSubs = _mainStream.listen(_onMainMessage);
     mainSink.send(_Ready(_mainStream.sendPort));
   }
-  static _EbookIsolate current;
-  StreamSubscription _mainStreamSubs;
+  static late final _EbookIsolate current;
+  late StreamSubscription _mainStreamSubs;
   final _mainStream = ReceivePort('Isolate port _EbookIsolate');
 
   void startJob(_JobSpec specification, Capability identity) async {
@@ -231,7 +231,7 @@ class _EbookIsolate {
       );
       final book = bookFrom(contents);
       events.add(EpubCreated());
-      final data = EpubWriter.writeBook(book);
+      final data = EpubWriter.writeBook(book)!;
       mainSink.send(_CompleteSuccessEvent(data, identity));
     } on Object catch (e) {
       mainSink.send(_CompleteErrorEvent(e, identity));

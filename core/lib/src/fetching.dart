@@ -11,7 +11,7 @@ import 'package:http/http.dart';
 import 'package:xml/xml.dart';
 import 'package:path/path.dart' as p;
 import 'package:meta/meta.dart';
-import 'package:tuple/tuple.dart';
+import 'package:utils/utils.dart';
 import 'event.dart';
 import 'fetch_progress.dart';
 import 'scraping.dart';
@@ -59,7 +59,7 @@ Future<String> _fetchAndImportCss(dynamic css, Client client) async {
   final uri = _uriFromUriOrString(css);
   var contents = await client.get(uri).then((r) => r.body);
   for (final imported in capturingImportRegex.allMatches(contents).toSet()) {
-    final importedUrl = imported.group(1);
+    final importedUrl = imported.group(1)!;
     final joint = uri.resolve(importedUrl);
     final importedCss = await _fetchAndImportCss(joint, client);
     contents = contents.replaceAll(importRegexFor(importedUrl), importedCss);
@@ -77,14 +77,14 @@ bool _uriIsWithin(Uri parent, Uri child) {
   return p.isWithin(p.normalize(parent.path), p.normalize(child.path));
 }
 
-Uri _uriRelativeFrom(Uri path, Uri from) {
+Uri? _uriRelativeFrom(Uri path, Uri from) {
   if (path.host != from.host) {
     return null;
   }
   return from.replace(path: _uriRelativePathFrom(path, from));
 }
 
-String _uriRelativePathFrom(Uri path, Uri from) {
+String? _uriRelativePathFrom(Uri path, Uri from) {
   if (path.host != from.host) {
     return null;
   }
@@ -112,11 +112,11 @@ class Context {
   final DocumentContents<String> _cssFile;
   final Map<Uri, Lock> _uriLockMap = {};
 
-  DocumentContents<String> __notFoundFile;
+  DocumentContents<String>? __notFoundFile;
   DocumentContents<String> get _notFoundFile => __notFoundFile ??= notFoundFile(
-      p.setExtension(_uriRelativePathFrom(indexUri, baseUri), '.xhtml'));
+      p.setExtension(_uriRelativePathFrom(indexUri, baseUri)!, '.xhtml'));
 
-  Uri __normalizedNotFoundFileUri;
+  Uri? __normalizedNotFoundFileUri;
   Uri get _normalizedNotFoundFileUri => __normalizedNotFoundFileUri ??=
       normalizeUri(baseUri.resolve(_notFoundFile.path));
 
@@ -130,7 +130,7 @@ class Context {
       uriOutsideOfArchiveOrg(uri.replace(scheme: 'https').normalizePath());
   final Sink<BookEvent> _eventSink;
 
-  void addEvent(BookEvent e) => _eventSink?.add(e);
+  void addEvent(BookEvent e) => _eventSink.add(e);
 
   Context._(
     this.baseUri,
@@ -201,7 +201,7 @@ class Context {
       );
 
   static String _pathKeyFor(Uri uri,
-      {bool isImage = false, Uri normalizedBaseUri}) {
+      {bool isImage = false, required Uri normalizedBaseUri}) {
     uri = normalizeUri(uri);
     if (!_uriIsWithin(normalizedBaseUri, uri)) {
       uri = normalizedBaseUri.resolve(p.join(
@@ -209,7 +209,7 @@ class Context {
         uri.pathSegments.join('_'),
       ));
     }
-    return _uriRelativePathFrom(uri, normalizedBaseUri);
+    return _uriRelativePathFrom(uri, normalizedBaseUri)!;
   }
 
   bool _isInAllowedSources(Uri normalizedUri) => _normalizedAllowedSources
@@ -221,8 +221,9 @@ class Context {
       (uri.isScheme('http') || uri.isScheme('https'));
   bool isImageAllowed(Uri uri) => p.extension(uri.path) != '.gif';
 
-  String relativePathTo(Uri uri, {Uri from}) => _uriRelativePathFrom(
-      normalizeUri(uri), _uriDirname(normalizeUri(from) ?? _normalizedBaseUri));
+  String relativePathTo(Uri uri, {required Uri from}) => _uriRelativePathFrom(
+      normalizeUri(uri),
+      _uriDirname(normalizeUri(from) ?? _normalizedBaseUri))!;
 
   bool containsDoc(Uri docUri) =>
       docs.containsKey(pathKeyFor(docUri)) || containsIndexed(docUri);
@@ -247,7 +248,7 @@ class Context {
 
   void insertImage(
     List<int> contents, {
-    @required Uri at,
+    required Uri at,
   }) {
     final key = pathKeyFor(at, isImage: true);
     if (images[key] != null) {
@@ -264,7 +265,7 @@ class Context {
     return _replacements[uri] ?? _maybeReplacements[uri] ?? uri;
   }
 
-  void maybeAddReplacement(Uri sourceUri, [Uri targetUri]) {
+  void maybeAddReplacement(Uri sourceUri, [Uri? targetUri]) {
     sourceUri = normalizeUri(sourceUri);
     if (_replacements[sourceUri] != null) {
       return;
@@ -282,7 +283,7 @@ class Context {
     _maybeReplacements[sourceUri] = target;
   }
 
-  void addReplacement(Uri sourceUri, [Uri targetUri]) {
+  void addReplacement(Uri sourceUri, [Uri? targetUri]) {
     sourceUri = normalizeUri(sourceUri);
     final target = targetUri == null
         ? _normalizedNotFoundFileUri
@@ -324,27 +325,27 @@ class Context {
         e.attributes['href'] = cssPathRelativeFrom(uri);
       });
       doc.document.getElementsByTagName('a').where(hasHref).forEach((e) {
-        final sections = hrefSections(e.attributes['href']);
-        final href = sections.item1;
+        final sections = hrefSections(e.attributes['href']!);
+        final href = sections.e0;
         var hrefUri = getUriOrReplacement(uri.resolve(href));
         hrefUri = baseUri.resolve(pathKeyFor(hrefUri));
         final targetPath = _uriRelativePathFrom(hrefUri, uri.resolve('.'));
         final target = [
           targetPath,
-          if (hrefUri != _normalizedNotFoundFileUri) ...sections.item2
+          if (hrefUri != _normalizedNotFoundFileUri) ...sections.e1
         ].join('#');
         e.attributes['href'] = target;
       });
 
       doc.document.getElementsByTagName('img').where(hasSrc).forEach((e) {
-        final src = e.attributes['src'];
+        final src = e.attributes['src']!;
         var srcUri = getUriOrReplacement(uri.resolve(src));
         srcUri = baseUri.resolve(pathKeyFor(srcUri, isImage: true));
         if (srcUri == _normalizedNotFoundFileUri) {
           e.remove();
           return;
         }
-        final targetPath = _uriRelativePathFrom(srcUri, uri.resolve('.'));
+        final targetPath = _uriRelativePathFrom(srcUri, uri.resolve('.'))!;
         e.attributes['src'] = targetPath;
       });
       if (_stripCss) {
@@ -405,7 +406,8 @@ class Context {
       });
     });
     const name = 'navFile.xhtml';
-    return DocumentContents(bdr.build().toXmlString(pretty: true), null, name);
+    return DocumentContents(
+        bdr.buildDocument().toXmlString(pretty: true), null, name);
   }
 
   BookContents buildContents(Uri indexBaseUri) {
@@ -421,7 +423,7 @@ class Context {
           navFile.path: navFile,
         },
         index,
-        _uriRelativePathFrom(indexBaseUri, baseUri),
+        _uriRelativePathFrom(indexBaseUri, baseUri)!,
         chapters,
         indexPath(),
         navFile.path);
@@ -438,11 +440,11 @@ Future<void> _scrapeFileFetchingReferred(
 ) async {
   final parentUri = parent.sourceUri;
   // idk what should happen? it shouldnt have been fetched?
-  if (parent.document.getElementsByTagName('title').maybeSingle?.text?.trim() ==
+  if (parent.document.getElementsByTagName('title').maybeSingle?.text.trim() ==
       'Wayback Machine') {
     return;
   }
-  for (final referred in remainingDepth <= 0 ? [] : parent.referredDocuments) {
+  for (final referred in remainingDepth <= 0 ? {} : parent.referredDocuments) {
     final referredUri = parentUri.resolve(referred);
     if (context.containsDoc(referredUri)) {
       final indexed = context.containsIndexed(referredUri);
@@ -529,11 +531,9 @@ Iterable<Tuple2<A, B>> _zip<A, B>(Iterable<A> a, Iterable<B> b) sync* {
 String withTrailingSlash(String other) =>
     other.endsWith('/') ? other : '$other/';
 Uri shallowest(Iterable<Uri> uris) {
-  List<String> shallowestFor(List<String> a, List<String> b) => _zip(a, b)
-      .takeWhile((e) => e.item1 == e.item2)
-      .map((e) => e.item1)
-      .toList();
-  final shallowestPath = uris.fold<List<String>>(
+  List<String> shallowestFor(List<String> a, List<String> b) =>
+      _zip(a, b).takeWhile((e) => e.e0 == e.e1).map((e) => e.e0).toList();
+  final shallowestPath = uris.fold<List<String>?>(
       null,
       (acc, e) =>
           acc == null ? e.pathSegments : shallowestFor(acc, e.pathSegments));
@@ -709,7 +709,7 @@ Future<BookContents> fetchBook(
   Iterable<String> baseUrls,
   int depth,
   Sink<BookEvent> eventSink, [
-  Client client,
+  Client? client,
   bool parallel = false,
   bool images = true,
   bool stripCss = false,
@@ -748,7 +748,7 @@ Future<BookContents> fetchBook(
 
   final cssData = await _fetchAndImportCss(cssUri, client);
   final targetCssPath = _uriIsWithin(rootUri, cssUri)
-      ? _uriRelativePathFrom(cssUri, rootUri)
+      ? _uriRelativePathFrom(cssUri, rootUri)!
       : p.join('stylesheets', p.basename(cssUri.path));
   final cssFile = DocumentContents(cssData, null, targetCssPath);
 

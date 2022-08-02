@@ -1,17 +1,15 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:console/console.dart';
 import 'package:core/core.dart';
 import 'package:core/src/client.dart';
 import 'package:epub/epub.dart';
 import 'package:args/args.dart';
-import 'package:hive/hive.dart';
 import 'package:html/dom.dart';
 import 'package:html/parser.dart';
 import 'package:http/http.dart';
 import 'package:path/path.dart' as p;
-import 'package:tuple/tuple.dart';
+import 'package:utils/utils.dart';
 
 class LogPreferences {
   final bool showSkipped;
@@ -22,13 +20,13 @@ class LogPreferences {
 }
 
 void Function(BookEvent e) _onEvent(LogPreferences p) {
-  final fetches = <Uri, Tuple3<Uri, FetchProgress, StreamSubscription>>{};
+  final fetches = <Uri, Tuple3<Uri?, FetchProgress?, StreamSubscription>>{};
   void log(Object o) {
     print(o);
   }
 
   void Function(FetchProgress) _onFetchProgress(Uri uri) => (e) {
-        fetches[uri] = fetches[uri].withItem2(e);
+        fetches[uri] = Tuple3(fetches[uri]!.e0, e, fetches[uri]!.e2);
       };
 
   return (e) {
@@ -38,12 +36,12 @@ void Function(BookEvent e) _onEvent(LogPreferences p) {
     }
     if (e is FetchComplete) {
       final state = fetches.remove(e.uri);
-      state.item3.cancel();
+      state!.e2.cancel();
       print('FETCHED: ${e.uri}');
     }
     if (e is FetchFailed) {
       final state = fetches.remove(e.uri);
-      state.item3.cancel();
+      state!.e2.cancel();
       print('FAILED : ${e.uri}: ${e.exception}');
     }
     if (e is Skipped) {
@@ -60,7 +58,7 @@ void Function(BookEvent e) _onEvent(LogPreferences p) {
           '${e.parent != null ? ' <- ${e.parent}' : ''}');
     }
     if (e is BookFetched) {
-      log('COMPLET: The book fetching is complete!');
+      log('COMPLETE: The book fetching is complete!');
     }
     if (e is BookContentsCreated) {
       log('CONTENT: The book content information was created');
@@ -75,22 +73,29 @@ void Function(BookEvent e) _onEvent(LogPreferences p) {
 }
 
 class GlobalSettings {
-  final File cssOverride;
-  final int rateLimit;
+  final File? cssOverride;
+  final int? rateLimit;
   final LogPreferences logPrefs;
-  final String outputFolder;
+  final String? outputFolder;
   final bool parallel;
   final bool images;
   final bool stripCss;
 
-  GlobalSettings(this.cssOverride, this.rateLimit, this.logPrefs,
-      this.outputFolder, this.parallel, this.images, this.stripCss);
+  GlobalSettings(
+    this.cssOverride,
+    this.rateLimit,
+    this.logPrefs,
+    this.outputFolder,
+    this.parallel,
+    this.images,
+    this.stripCss,
+  );
 }
 
 class SingleRequest {
   final GlobalSettings settings;
   final String url;
-  final String output;
+  final String? output;
   final List<String> baseUrls;
   final int depth;
 
@@ -161,7 +166,7 @@ Future<int> main(List<String> args) async {
   final rateLimit = results['rateLimit'] == null
       ? null
       : int.tryParse(results['rateLimit'] as String);
-  final cssOverride = results['cssOverride'] as String;
+  final cssOverride = results['cssOverride'] as String?;
   final logPrefs = LogPreferences(
     results['logSkipped'] as bool,
     results['showFetch'] as bool,
@@ -184,8 +189,8 @@ Future<int> main(List<String> args) async {
       return SingleRequest(
           globalPrefs,
           url,
-          e['output'] as String,
-          (e['baseUrl'] as Iterable<String> ?? [])
+          e['output'] as String?,
+          (e['baseUrl'] as Iterable<String>? ?? [])
               .followedBy([p.dirname(url)]).toList(),
           int.parse(ArgumentError.checkNotNull(e['depth'], 'depth')));
     },
@@ -195,7 +200,7 @@ Future<int> main(List<String> args) async {
     return 1;
   }
   if (globalPrefs.outputFolder != null) {
-    final dir = Directory(globalPrefs.outputFolder);
+    final dir = Directory(globalPrefs.outputFolder!);
     if (!dir.existsSync()) {
       await dir.create(recursive: true);
     }
@@ -206,28 +211,12 @@ Future<int> main(List<String> args) async {
 
 Future<void> processRequest(
     SingleRequest request, void Function(BookEvent) onEvent) async {
-  final mode = 'none'; //results['mode'] as String;
-  Hive.init(Directory.current.path);
   var client = Client();
   if (request.settings.rateLimit != null) {
     client = RateLimitedClient(
-        client, Duration(milliseconds: request.settings.rateLimit));
-  }
-  switch (mode) {
-    case 'recording':
-      final storage = HiveProxyClientStorage();
-      await storage.init();
-      client = RecordingClient(client, storage);
-      break;
-    case 'replaying':
-      final storage = HiveProxyClientStorage();
-      await storage.init();
-      await storage.dump();
-      client = ReplayingClient(storage);
-      break;
-    case 'none':
-      client = client;
-      break;
+      client,
+      Duration(milliseconds: request.settings.rateLimit!),
+    );
   }
   final eventController = StreamController<BookEvent>();
   eventController.stream.listen(onEvent);
@@ -244,7 +233,7 @@ Future<void> processRequest(
   );
 
   if (request.settings.cssOverride != null) {
-    final css = request.settings.cssOverride;
+    final css = request.settings.cssOverride!;
     if (!css.existsSync()) {
       throw StateError('Invalid css!');
     }
@@ -275,9 +264,8 @@ Future<void> processRequest(
         p.join(request.settings.outputFolder ?? '.', removeSlashes(output));
   }
   final outputFile = File(output);
-  await outputFile.writeAsBytes(EpubWriter.writeBook(book));
+  await outputFile.writeAsBytes(EpubWriter.writeBook(book)!);
   print('SAVED  : To `$output`!');
-  return outputFile;
 }
 
 String removeSlashes(String s) => s.replaceAll(r'/', '_');

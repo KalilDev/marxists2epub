@@ -8,7 +8,7 @@ import 'package:mime/src/default_extension_map.dart';
 import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as dom_parser;
 import 'package:http/http.dart';
-import 'package:tuple/tuple.dart';
+import 'package:utils/utils.dart';
 import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
 import 'package:xml/xml.dart';
@@ -18,15 +18,15 @@ import 'navigation.dart';
 const String kNcxMime = 'application/x-dtbncx+xml';
 
 extension ItE<T> on Iterable<T> {
-  T get maybeSingle => length != 1 ? null : single;
+  T? get maybeSingle => length != 1 ? null : single;
 }
 
 extension StringE on String {
-  String get nonEmpty => isEmpty ? null : this;
+  String? get nonEmpty => isEmpty ? null : this;
 }
 
 extension MapE<K, V> on LinkedHashMap<K, V> {
-  V get(K key) => this[key];
+  V? get(K key) => this[key];
 }
 
 // TODO. lots of heuristics
@@ -109,7 +109,7 @@ void fixupHtml(dom.Document doc) {
     if (!attrs.containsKey("http-equiv")) {
       return;
     }
-    if (attrs['http-equiv'].toLowerCase() != 'content-type') {
+    if (attrs['http-equiv']?.toLowerCase() != 'content-type') {
       return;
     }
     attrs['content'] = 'text/html; charset=utf-8';
@@ -128,7 +128,7 @@ void fixupHtml(dom.Document doc) {
     if (eAttrReplacements != null) {
       attrs.keys
           .where(eAttrReplacements.containsKey)
-          .forEach((attr) => e.attributes[attr] = eAttrReplacements[attr]);
+          .forEach((attr) => e.attributes[attr] = eAttrReplacements[attr]!);
     }
   });
 }
