@@ -14,12 +14,13 @@ List<epub.EpubChapter> _chaptersFor(BookContents contents) {
       .map((e) => Tuple2(p.normalize(p.join(contents.indexBasePath, e)),
           contents.chapterNameFor(e)));
   return chapters
-      .map((chapter) => epub.EpubChapter()
-        ..Anchor = null
-        ..SubChapters = [] // todo
-        ..Title = chapter.e0
-        ..ContentFileName = withContentPath(chapter.e0)
-        ..HtmlContent = contents.htmls[chapter.e0]!.contents)
+      .map((chapter) => epub.EpubChapter(
+            chapter.e0,
+            withContentPath(chapter.e0),
+            null,
+            contents.htmls[chapter.e0]!.contents,
+            [], // todo
+          ))
       .toList();
 }
 
@@ -28,80 +29,97 @@ epub.EpubBook bookFrom(
 ) {
   final uid = _uuid.v4();
   final navigation = _navigationFor(contents, uid);
-  final navigationFile = epub.EpubTextContentFile()
-    ..Content = navigationToXmlString(navigation)
-    ..ContentType = epub.EpubContentType.DTBOOK_NCX
-    ..ContentMimeType = kNcxMime
-    ..FileName = 'toc.ncx';
-  return epub.EpubBook()
-    ..Author = contents.index.author
-    ..AuthorList = [contents.index.author]
-    ..Title = contents.index.title
-    ..Chapters = _chaptersFor(contents)
-    ..Content = _contentFor(
+  final navigationFile = epub.EpubTextContentFile(
+    'toc.ncx',
+    epub.EpubContentType.DTBOOK_NCX,
+    kNcxMime,
+    navigationToXmlString(navigation),
+  );
+
+  return epub.EpubBook(
+    contents.index.title,
+    contents.index.author,
+    [contents.index.author],
+    epub.EpubSchema(
+        epub.EpubPackage(
+          epub.EpubVersion.Epub3,
+          _metadataFor(contents.index, uid),
+          _manifestFor(contents, 'toc.ncx'),
+          _spineFor(contents),
+          _guideFor(contents),
+        ),
+        navigation,
+        contentPath),
+    _contentFor(
       contents,
       navigationFile,
-    )
-    ..Schema = (epub.EpubSchema()
-      ..ContentDirectoryPath = contentPath
-      ..Package = (epub.EpubPackage()
-        ..Guide = _guideFor(contents)
-        ..Version = epub.EpubVersion.Epub3
-        ..Manifest = _manifestFor(contents, 'toc.ncx')
-        ..Spine = _spineFor(contents)
-        ..Metadata = _metadataFor(contents.index, uid))
-      ..Navigation = navigation);
+    ),
+    null,
+    _chaptersFor(contents),
+  );
 }
 
 final _uuid = Uuid();
 epub.EpubNavigation _navigationFor(BookContents contents, String uid) {
-  final nav = epub.EpubNavigation();
-  final navMap = epub.EpubNavigationMap();
-  var i = 1;
-  for (final doc in [contents.indexPath]
-      .followedBy(contents.documentChapterNameMap.keys)
-      .toSet()) {
-    final point = epub.EpubNavigationPoint()
-      ..PlayOrder = (i++).toString()
-      ..Id = 'navPoint-${_uuid.v4()}'
-      ..Content = (epub.EpubNavigationContent()
-        ..Source = p.normalize(p.join(contents.indexBasePath, doc)))
-      ..NavigationLabels.addAll(
-          [epub.EpubNavigationLabel()..Text = contents.chapterNameFor(doc)]);
-    navMap.Points.add(point);
+  final epub.EpubNavigationMap navMap;
+  {
+    var i = 1;
+    navMap = epub.EpubNavigationMap([
+      for (final doc in [contents.indexPath]
+          .followedBy(contents.documentChapterNameMap.keys)
+          .toSet())
+        () {
+          final point = epub.EpubNavigationPoint(
+            'navPoint-${_uuid.v4()}',
+            null,
+            (i++).toString(),
+            [epub.EpubNavigationLabel(contents.chapterNameFor(doc))],
+            epub.EpubNavigationContent(
+              null,
+              p.normalize(p.join(contents.indexBasePath, doc)),
+            ),
+            [],
+          );
+          return point;
+        }(),
+    ]);
   }
-  nav
-    ..DocAuthors.addAll([
-      epub.EpubNavigationDocAuthor()..Authors.addAll([contents.index.author])
-    ])
-    ..DocTitle =
-        (epub.EpubNavigationDocTitle()..Titles.addAll([contents.index.title]))
-    ..Head = (epub.EpubNavigationHead()
-      ..Metadata.addAll([
-        epub.EpubNavigationHeadMeta()
-          ..Content = uid
-          ..Name = 'dtb:uid',
-        epub.EpubNavigationHeadMeta()
-          ..Content = '0'
-          ..Name = 'dtb:totalPageCount',
-        epub.EpubNavigationHeadMeta()
-          ..Content = '0'
-          ..Name = 'dtb:maxPageNumber',
-        epub.EpubNavigationHeadMeta()
-          ..Content =
-              '2' // should be 1, but idk what else to try to fix the pagination with.
-          ..Name = 'dtb:depth',
-      ]))
-    ..NavLists.addAll([])
-    ..PageList = (epub.EpubNavigationPageList()..Targets.addAll([]))
-    ..NavMap = navMap;
-  return nav;
+  return epub.EpubNavigation(
+    epub.EpubNavigationHead([
+      epub.EpubNavigationHeadMeta(
+        uid,
+        'dtb:uid',
+        null,
+      ),
+      epub.EpubNavigationHeadMeta(
+        '0',
+        'dtb:totalPageCount',
+        null,
+      ),
+      epub.EpubNavigationHeadMeta(
+        '0',
+        'dtb:maxPageNumber',
+        null,
+      ),
+      epub.EpubNavigationHeadMeta(
+        '2', // should be 1, but idk what else to try to fix the pagination with.
+        'dtb:depth',
+        null,
+      ),
+    ]),
+    epub.EpubNavigationDocTitle([contents.index.title]),
+    [
+      epub.EpubNavigationDocAuthor([contents.index.author])
+    ],
+    navMap,
+    epub.EpubNavigationPageList([]),
+    [],
+  );
 }
 
 epub.EpubMetadata _metadataFor(ScrapedDocument index, String uid) {
-  final meta = epub.EpubMetadata();
   const contributorRoles = {
-    'Transcription\HTML Markup': 'trc',
+    'Transcription\\HTML Markup': 'trc',
     'Translator': 'trl',
     'Edited/Translated': 'clb',
     'Transcription/Markup': 'trc',
@@ -126,70 +144,87 @@ epub.EpubMetadata _metadataFor(ScrapedDocument index, String uid) {
     'Online Version',
     // TODO
   ];
-  return meta
-    ..Contributors.addAll(contributorRoles.keys
-        .where(index.scrapedInfo.containsKey)
-        .map((e) => epub.EpubMetadataContributor()
-          ..Contributor = index.scrapedInfo[e]!
-          ..Role = contributorRoles[e]!))
-    ..Creators.addAll([
-      epub.EpubMetadataCreator()..Creator = index.author,
+  return epub.EpubMetadata(
+    [index.title],
+    [
+      epub.EpubMetadataCreator(index.author, null, null),
       ...creatorKeys
           .where(index.scrapedInfo.containsKey)
-          .map((e) => epub.EpubMetadataCreator()
-            ..Creator = index.scrapedInfo[e]!
-            ..Role = e)
-    ])
-    ..Dates.addAll(datesKeys
+          .map((e) => epub.EpubMetadataCreator(
+                index.scrapedInfo[e]!,
+                null,
+                e,
+              ))
+    ],
+    ['Sociology'],
+    null,
+    ['Marxists.org'],
+    contributorRoles.keys
         .where(index.scrapedInfo.containsKey)
-        .map((e) => epub.EpubMetadataDate()
-          ..Date = index.scrapedInfo[e]!
-          ..Event = e))
-    ..Identifiers.addAll([
-      epub.EpubMetadataIdentifier()
-        ..Id = 'uuid_id'
-        ..Identifier = uid
-    ])
-    ..Languages.addAll(['en'])
-    ..Publishers.addAll(['Marxists.org'])
-    ..Rights.addAll(copyrightsKeys
+        .map(
+          (e) => epub.EpubMetadataContributor(
+            index.scrapedInfo[e]!,
+            null,
+            contributorRoles[e]!,
+          ),
+        )
+        .toList(),
+    datesKeys
         .where(index.scrapedInfo.containsKey)
-        .map((e) => index.scrapedInfo[e]!))
-    ..Sources.addAll(sourcesKeys
+        .map((e) => epub.EpubMetadataDate(
+              index.scrapedInfo[e]!,
+              e,
+            ))
+        .toList(),
+    [],
+    [],
+    [
+      epub.EpubMetadataIdentifier(
+        'uuid_id',
+        null,
+        uid,
+      )
+    ],
+    sourcesKeys
         .where(index.scrapedInfo.containsKey)
-        .map((e) => index.scrapedInfo[e]!))
-    ..Subjects.addAll(['Sociology'])
-    ..Titles.addAll([index.title]);
+        .map((e) => index.scrapedInfo[e]!)
+        .toList(),
+    ['en'],
+    [],
+    [],
+    copyrightsKeys
+        .where(index.scrapedInfo.containsKey)
+        .map((e) => index.scrapedInfo[e]!)
+        .toList(),
+    [],
+  );
 }
 
 epub.EpubContent _contentFor(
   BookContents contents,
-  epub.EpubContentFile navigationFile,
+  epub.EpubTextContentFile navigationFile,
 ) {
-  final content = epub.EpubContent();
-  content
-    ..Html.addAll(contents.htmls.map((k, v) => MapEntry(
+  final content = epub.EpubContent(
+    {
+      ...contents.htmls.map((k, v) => MapEntry(
+            k,
+            v.toEpubContentFile(contents.indexBasePath)
+                as epub.EpubTextContentFile,
+          )),
+      navigationFile.fileName: navigationFile
+    },
+    contents.css.map((k, v) => MapEntry(
           k,
           v.toEpubContentFile(contents.indexBasePath)
               as epub.EpubTextContentFile,
-        )))
-    ..Css.addAll(contents.css.map((k, v) => MapEntry(
-          k,
-          v.toEpubContentFile(contents.indexBasePath)
-              as epub.EpubTextContentFile,
-        )))
-    ..Images.addAll(contents.images.map((k, v) => MapEntry(
+        )),
+    contents.images.map((k, v) => MapEntry(
           k,
           v.toEpubContentFile(contents.indexBasePath)
               as epub.EpubByteContentFile,
-        )));
-  content.AllFiles.addAll({
-    ...content.Html,
-    ...content.Css,
-    ...content.Fonts,
-    ...content.Images,
-    navigationFile.FileName!: navigationFile
-  });
+        )),
+    {},
+  );
   return content;
 }
 
@@ -197,25 +232,36 @@ epub.EpubManifest _manifestFor(
   BookContents contents,
   String tocPath,
 ) {
-  final manifest = epub.EpubManifest();
-  manifest.Items.addAll(contents.allContents.map((e) => epub.EpubManifestItem()
-        ..Id = e.id
-        ..Href = e.path
-        ..MediaType = e.mimeType
-
-      //..Properties = contents.navFilePath == e.path ? 'nav' : null
-      ));
-  manifest.Items.add(epub.EpubManifestItem()
-    ..Id = idFor(tocPath)
-    ..Href = tocPath
-    ..MediaType = kNcxMime);
+  final manifest = epub.EpubManifest([
+    ...contents.allContents.map((e) => epub.EpubManifestItem(
+              e.id,
+              e.path,
+              e.mimeType,
+              // The rest is ignored by the writer
+              '',
+              '',
+              '',
+              '',
+            )
+        //..Properties = contents.navFilePath == e.path ? 'nav' : null
+        ),
+    epub.EpubManifestItem(
+      idFor(tocPath),
+      tocPath,
+      kNcxMime,
+      // The rest is ignored by the writer
+      '',
+      '',
+      '',
+      '',
+    )
+  ]);
   return manifest;
 }
 
 epub.EpubSpine _spineFor(
   BookContents contents,
 ) {
-  final spine = epub.EpubSpine();
   final ids = contents.htmls.values.map((e) => e.id);
   final chapterIds = [contents.indexPath]
       .followedBy([contents.navFilePath])
@@ -223,21 +269,20 @@ epub.EpubSpine _spineFor(
       .map((e) => p.normalize(p.join(contents.indexBasePath, e)))
       .map(idFor)
       .toSet();
-  spine.Items.addAll(ids.map((e) => epub.EpubSpineItemRef()
-        ..IdRef = e
-        // The write logic is flipped on package:epub, the condition
-        // needs to be negated for the correct behavior.
-        ..IsLinear =
-            !chapterIds.contains(e) //!chapterIds.contains(e), // FIXXXX
-      ));
-  spine.TableOfContents = 'toc';
-  return spine;
+  return epub.EpubSpine(
+    'toc',
+    ids
+        .map((e) => epub.EpubSpineItemRef(
+              e,
+              chapterIds.contains(e),
+            ))
+        .toList(),
+  );
 }
 
 epub.EpubGuide _guideFor(
   BookContents contents,
 ) {
-  final guide = epub.EpubGuide();
   const docNamesAndTypes = [
     Tuple2('index.htm', 'index'),
     Tuple2('preface.htm', 'preface'),
@@ -251,15 +296,12 @@ epub.EpubGuide _guideFor(
   final localDocNamesAndTypes = docNamesAndTypes.map(
       (e) => Tuple2(p.normalize(p.join(contents.indexBasePath, e.e0)), e.e1));
 
-  for (final localDt
-      in localDocNamesAndTypes.where((e) => contents.htmls.containsKey(e.e0))) {
-    guide.Items.add(
-      epub.EpubGuideReference()
-        ..Href = localDt.e0
-        ..Type = localDt.e1
-        ..Title = contents.chapterNameFor(localDt.e0),
-    );
-  }
-
-  return guide;
+  return epub.EpubGuide(localDocNamesAndTypes
+      .where((e) => contents.htmls.containsKey(e.e0))
+      .map((localDt) => epub.EpubGuideReference(
+            localDt.e1,
+            contents.chapterNameFor(localDt.e0),
+            localDt.e0,
+          ))
+      .toList());
 }

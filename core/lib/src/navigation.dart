@@ -8,38 +8,38 @@ void writeNavigation(EpubNavigation navigation, XmlBuilder bdr) {
       ..attribute('xmlns', 'http://www.daisy.org/z3986/2005/ncx/')
       ..attribute('version', '2005-1')
       ..attribute('xml:lang', 'pt');
-    writeHead(navigation.Head, bdr);
-    writeDocTitle(navigation.DocTitle, bdr);
-    writeDocAuthors(navigation.DocAuthors, bdr);
-    writeNavMap(navigation.NavMap, bdr);
-    writePageList(navigation.PageList, bdr);
+    writeHead(navigation.head, bdr);
+    writeDocTitle(navigation.docTitle, bdr);
+    writeDocAuthors(navigation.docAuthors, bdr);
+    writeNavMap(navigation.navMap, bdr);
+    if (navigation.pageList != null) {
+      writePageList(navigation.pageList!, bdr);
+    }
   });
 }
 
 void writeHead(EpubNavigationHead head, XmlBuilder builder) {
-  if (head == null || head.Metadata == null || head.Metadata.isEmpty) {
+  if (head.metadata.isEmpty) {
     return;
   }
   builder.element('head', nest: () {
-    for (final e in head.Metadata) {
+    for (final e in head.metadata) {
       builder.element('meta', nest: () {
-        if (e.Content != null) {
-          builder..attribute('content', e.Content!);
-        }
+        builder.attribute('content', e.content);
         builder
-          ..attribute('name', e.Name)
-          ..maybeAttribute('scheme', e.Scheme);
+          ..attribute('name', e.name)
+          ..maybeAttribute('scheme', e.schema);
       });
     }
   });
 }
 
 void writeDocTitle(EpubNavigationDocTitle title, XmlBuilder builder) {
-  if (title == null || title.Titles == null || title.Titles.isEmpty) {
+  if (title.titles.isEmpty) {
     return;
   }
   builder.element('docTitle', nest: () {
-    for (final title in title.Titles) {
+    for (final title in title.titles) {
       builder.element('text', nest: title);
     }
   });
@@ -47,12 +47,12 @@ void writeDocTitle(EpubNavigationDocTitle title, XmlBuilder builder) {
 
 void writeDocAuthors(
     List<EpubNavigationDocAuthor> authors, XmlBuilder builder) {
-  if (authors == null || authors.isEmpty) {
+  if (authors.isEmpty) {
     return;
   }
   for (final authorGroup in authors) {
     builder.element('docAuthor', nest: () {
-      for (final author in authorGroup.Authors) {
+      for (final author in authorGroup.authors) {
         builder.element('text', nest: author);
       }
     });
@@ -60,7 +60,7 @@ void writeDocAuthors(
 }
 
 extension on XmlBuilder {
-  void maybeAttribute(String name, Object value) {
+  void maybeAttribute(String name, Object? value) {
     if (value != null) {
       attribute(name, value);
     }
@@ -73,43 +73,40 @@ void writePoint(EpubNavigationPoint point, XmlBuilder builder) {
   }
   builder.element('navPoint', nest: () {
     builder
-      ..maybeAttribute('id', point.Id)
-      ..maybeAttribute('playOrder', point.PlayOrder)
-      ..maybeAttribute('class', point.Class);
-    for (final label in point.NavigationLabels ?? <EpubNavigationLabel>[]) {
-      if (label == null || label.Text == null) {
-        continue;
-      }
+      ..maybeAttribute('id', point.id)
+      ..maybeAttribute('playOrder', point.playOrder)
+      ..maybeAttribute('class', point.klass);
+    for (final label in point.navigationLabels) {
       builder.element('navLabel', nest: () {
-        builder.element('text', nest: label.Text);
+        builder.element('text', nest: label.text);
       });
     }
-    if (point.Content != null) {
+    if (point.content != null) {
       builder.element('content', nest: () {
         builder
-          ..maybeAttribute('id', point.Content.Id)
-          ..attribute('src', point.Content.Source);
+          ..maybeAttribute('id', point.content.id)
+          ..attribute('src', point.content.source);
       });
     }
-    for (final child in point.ChildNavigationPoints) {
+    for (final child in point.childNavigationPoints) {
       writePoint(child, builder);
     }
   });
 }
 
 void writeNavMap(EpubNavigationMap navMap, XmlBuilder builder) {
-  if (navMap == null || navMap.Points == null || navMap.Points.isEmpty) {
+  if (navMap == null || navMap.points == null || navMap.points.isEmpty) {
     return;
   }
   builder.element('navMap', nest: () {
-    for (final p in navMap.Points) {
+    for (final p in navMap.points) {
       writePoint(p, builder);
     }
   });
 }
 
 void writePageList(EpubNavigationPageList pageList, XmlBuilder builder) {
-  if (pageList == null || pageList.Targets.isEmpty) {
+  if (pageList == null || pageList.targets.isEmpty) {
     return;
   }
   throw UnimplementedError();

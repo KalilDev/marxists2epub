@@ -76,18 +76,20 @@ class DocumentContents<T> {
   epub.EpubContentFile toEpubContentFile(String basePath) {
     final path = p.normalize(p.join(basePath, this.path));
     if (contents is List<int>) {
-      return epub.EpubByteContentFile()
-        ..Content = contents as List<int>
-        ..ContentMimeType = mimeType
-        ..ContentType = contentType
-        ..FileName = path;
+      return epub.EpubByteContentFile(
+        path,
+        contentType,
+        mimeType,
+        contents as List<int>,
+      );
     }
     if (contents is String) {
-      return epub.EpubTextContentFile()
-        ..Content = contents as String
-        ..ContentMimeType = mimeType
-        ..ContentType = contentType
-        ..FileName = path;
+      return epub.EpubTextContentFile(
+        path,
+        contentType,
+        mimeType,
+        contents as String,
+      );
     }
     throw TypeError();
   }

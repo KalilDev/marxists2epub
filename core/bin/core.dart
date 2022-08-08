@@ -248,7 +248,7 @@ Future<void> processRequest(
   await eventController.close();
 
   final userDefinedOutput = request.output;
-  var output = p.setExtension(book.Title, '.epub');
+  var output = p.setExtension(book.title!, '.epub');
   if (userDefinedOutput != null) {
     final type = await FileSystemEntity.type(userDefinedOutput);
     switch (type) {
